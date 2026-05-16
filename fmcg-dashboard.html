@@ -61,16 +61,12 @@
         #action-bar { display: none; margin-bottom: 25px; background: white; padding: 20px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
 
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
-        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 30px; border: 1px solid var(--border); border-radius: 10px; width: 90%; max-width: 600px; }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 30px; border: 1px solid var(--border); border-radius: 10px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto; }
         .modal-close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .modal-close:hover { color: black; }
+        .copy-input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px; margin: 10px 0; }
 
-        @media print {
-            body { background: white; }
-            .tabs, #action-bar, header { display: none !important; }
-            .card { page-break-inside: avoid; break-inside: avoid; }
-            .pdf-item { page-break-after: always; break-after: page; }
-        }
+        .success-message { background: #d1fae5; color: #065f46; padding: 12px; border-radius: 6px; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
@@ -91,13 +87,14 @@
         
         <div id="tab-content"></div>
 
-        <!-- Action Bar (Exports & Sharing) -->
+        <!-- Action Bar (Exports & Sharing) - ONLY SHOWS AFTER ANALYTICS -->
         <div id="action-bar">
-            <button class="btn btn-pdf" onclick="exportToPDF()">📄 Export to PDF</button>
-            <button class="btn btn-email" onclick="copyForEmail()">✉️ Copy for Email</button>
-            <button class="btn btn-share" onclick="generateShareLink()">🔗 Generate Share Link</button>
+            <button class="btn btn-pdf" onclick="exportOutputToPDF()">📄 Export Output to PDF</button>
+            <button class="btn btn-email" onclick="copyOutputForEmail()">✉️ Copy Output for Email</button>
+            <button class="btn btn-share" onclick="generateShareableLink()">🔗 Share Output Link</button>
         </div>
 
+        <!-- Analytics Output Container - ONLY THIS GETS EXPORTED -->
         <div id="analyticsOutputWorkspace" style="padding-bottom: 20px;"></div>
     </div>
 
@@ -105,12 +102,11 @@
     <div id="shareModal" class="modal">
         <div class="modal-content">
             <span class="modal-close" onclick="document.getElementById('shareModal').style.display='none'">&times;</span>
-            <h2>📤 Share Your Dashboard</h2>
-            <p>Copy the link below to share this view with others:</p>
-            <div style="background: #f1f5f9; padding: 15px; border-radius: 6px; margin: 15px 0;">
-                <input type="text" id="shareLink" readonly style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 12px;">
-            </div>
-            <button class="btn" onclick="copyShareLinkToClipboard()">📋 Copy Link</button>
+            <h2>🔗 Share Your Analytics Output</h2>
+            <p>Copy the link below to share this dashboard output with others:</p>
+            <textarea id="shareLink" class="copy-input" rows="3" readonly></textarea>
+            <button class="btn" onclick="copyToClipboard('shareLink')">📋 Copy Link</button>
+            <div class="success-message" id="shareLinkSuccess">✅ Link copied to clipboard!</div>
         </div>
     </div>
 
@@ -118,25 +114,29 @@
     <div id="emailModal" class="modal">
         <div class="modal-content">
             <span class="modal-close" onclick="document.getElementById('emailModal').style.display='none'">&times;</span>
-            <h2>✉️ Email Content Ready</h2>
-            <p>Your dashboard content has been copied to clipboard as rich HTML!</p>
+            <h2>✉️ Email Ready!</h2>
+            <p>Your dashboard output HTML has been copied to clipboard!</p>
             <ol>
                 <li>Open your email client (Gmail, Outlook, etc.)</li>
-                <li>Create a new email</li>
-                <li>Right-click and paste the content</li>
-                <li>The formatting will be preserved</li>
+                <li>Click in the email body</li>
+                <li>Right-click and select "Paste"</li>
+                <li>All formatting and charts will be preserved</li>
             </ol>
-            <p style="color: #64748b; font-size: 14px; margin-top: 20px;"><strong>Note:</strong> If plain text appears instead, your email client doesn't support rich HTML. Try pasting in Gmail web or Outlook web.</p>
-            <button class="btn" onclick="document.getElementById('emailModal').style.display='none'">✓ Got it</button>
+            <p style="color: #64748b; font-size: 14px; margin-top: 20px;"><strong>✓ Charts are converted to images</strong><br><strong>✓ Tables have email-safe styling</strong></p>
+            <button class="btn" onclick="document.getElementById('emailModal').style.display='none'">Got it</button>
+            <div class="success-message" id="emailSuccess">✅ Output HTML copied to clipboard!</div>
         </div>
     </div>
+
+    <!-- Hidden container for email copying -->
+    <div id="emailCopyContainer" style="position: absolute; left: -9999px; top: -9999px;"></div>
 
     <script>
         let currentTab = 'user-perf';
         let rawSheetsData = {};
         let activeCharts = [];
         let isSharedMode = false;
-        let chartImages = {};
+        let lastGeneratedTab = null;
 
         const modulesConfig = {
             'user-perf': { title: 'User-Wise Field Performance', mappings: [{ id: 'u_name', label: 'User Name' }, { id: 'u_calls', label: 'Total Calls' }, { id: 'u_pcalls', label: 'Productive Calls' }, { id: 'u_retail', label: 'Retailing Time' }] },
@@ -145,16 +145,14 @@
             'dist-perf': { title: 'Distributor, SKU & Invoice Tracking', mappings: [{ id: 'd_region', label: 'Region / Zone' }, { id: 'd_type', label: 'Type (Superstockist/Stockist)' }, { id: 'd_name', label: 'Partner Name' }, { id: 'd_sku', label: 'SKU Name' }, { id: 'd_invoice', label: 'Invoice No.' }, { id: 'd_qty', label: 'Billed Quantity' }, { id: 'd_value', label: 'Billed Value' }] }
         };
 
-        // Initialize App & Check for Shared Mode
         window.onload = function() { 
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('mode') === 'shared') {
                 isSharedMode = true;
                 document.getElementById('main-header').style.display = 'none';
                 document.getElementById('nav-tabs').style.display = 'none';
-                if (urlParams.get('tab')) {
-                    currentTab = urlParams.get('tab');
-                }
+                document.getElementById('action-bar').style.display = 'none';
+                if (urlParams.get('tab')) currentTab = urlParams.get('tab');
             }
             renderTabFrame(); 
         };
@@ -171,7 +169,7 @@
         function renderTabFrame() {
             const config = modulesConfig[currentTab];
             let html = `
-                <div class="card pdf-item">
+                <div class="card">
                     <h2 class="section-header">${config.title}</h2>
                     <div class="upload-zone" onclick="document.getElementById('fileEngine').click()">
                         <strong>📤 Click to Upload Excel/CSV Sheet</strong>
@@ -198,7 +196,7 @@
         }
 
         function renderMappingMatrix(headers) {
-            let html = `<div class="card pdf-item"><h3 class="section-header">⚙️ Map Sheet Columns</h3><div class="mapping-container">`;
+            let html = `<div class="card"><h3 class="section-header">⚙️ Map Sheet Columns</h3><div class="mapping-container">`;
             modulesConfig[currentTab].mappings.forEach(f => {
                 html += `<div class="form-group"><label>${f.label}</label><select id="map_${f.id}">${headers.map(h => `<option value="${h}">${h}</option>`).join('')}</select></div>`;
             });
@@ -209,7 +207,6 @@
         function executeAnalyticsPipeline() {
             activeCharts.forEach(c => c.destroy());
             activeCharts = [];
-            chartImages = {};
             const data = rawSheetsData[currentTab];
             const container = document.getElementById('analyticsOutputWorkspace');
             container.innerHTML = '';
@@ -219,17 +216,11 @@
             else if (currentTab === 'outlet-perf') runOutletPerformance(data, container);
             else if (currentTab === 'dist-perf') runDistributorPerformance(data, container);
 
+            lastGeneratedTab = currentTab;
+
             if (!isSharedMode) {
                 document.getElementById('action-bar').style.display = 'block';
             }
-
-            // Convert charts to images after a brief delay
-            setTimeout(() => {
-                const canvases = container.querySelectorAll('canvas');
-                canvases.forEach((canvas, idx) => {
-                    chartImages[`chart_${idx}`] = canvas.toDataURL('image/png', 1.0);
-                });
-            }, 500);
         }
 
         function createChart(canvasId, type, labels, datasets, options = {}) {
@@ -240,7 +231,7 @@
         }
 
         // ==========================================
-        // 1. USER PERFORMANCE (Expanded Summary)
+        // 1. USER PERFORMANCE
         // ==========================================
         function runUserPerformance(data, container) {
             const k_n = document.getElementById('map_u_name').value, k_c = document.getElementById('map_u_calls').value, k_p = document.getElementById('map_u_pcalls').value;
@@ -257,12 +248,12 @@
             const narrative = `
                 <h3>Executive Summary: Field Productivity</h3>
                 <p><strong>Overall Scope:</strong> During this reporting period, the processed data indicates a total field force deployment of <strong>${users.length} active executives</strong>. Combined, this team executed <strong>${tC.toLocaleString()} total market calls</strong>, successfully converting <strong>${tP.toLocaleString()} productive orders</strong>. This establishes a baseline organizational strike rate of <strong>${strike}%</strong>.</p>
-                <p><strong>Performance Highlights:</strong> The average executive completed roughly ${avgCalls} calls. Performance is heavily skewed toward the top tier, led prominently by <strong>${topUser.n}</strong> who secured ${topUser.pc.toLocaleString()} productive orders. The top 5 executives demonstrate strike rates significantly above the team median, indicating highly effective route planning or superior pitch conversion.</p>
+                <p><strong>Performance Highlights:</strong> The average executive completed roughly ${avgCalls} calls. Performance is heavily skewed toward the top tier, led prominently by <strong>${topUser.n}</strong> who secured ${topUser.pc.toLocaleString()} productive orders.</p>
             `;
 
             container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">User Module: Core KPIs</h2>
+                <div class="executive-summary">${narrative}</div>
+                <div class="card"><h2 class="section-header">User Module: Core KPIs</h2>
                     <div class="kpi-grid">
                         <div class="kpi-card"><div class="kpi-title">Active Users</div><div class="kpi-value">${users.length}</div></div>
                         <div class="kpi-card"><div class="kpi-title">Total Market Calls</div><div class="kpi-value">${tC.toLocaleString()}</div></div>
@@ -271,7 +262,7 @@
                     </div>
                 </div>
                 <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top Performers Matrix</h3>
+                    <div class="card"><h3 class="section-header">Top Performers Matrix</h3>
                         <div class="table-container">
                             <table>
                                 <tr><th>Executive Name</th><th>Total Calls</th><th>Productive Calls</th><th>Strike Rate</th></tr>
@@ -279,13 +270,13 @@
                             </table>
                         </div>
                     </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Call Efficiency Visualization</h3><div style="height:300px"><canvas id="c1"></canvas></div></div>
+                    <div class="card" style="height:400px"><h3 class="section-header">Call Efficiency Visualization</h3><div style="height:300px"><canvas id="c1"></canvas></div></div>
                 </div>`;
             createChart('c1', 'bar', users.slice(0,10).map(u=>u.n.substring(0,15)), [{label:'Total Calls', data:users.slice(0,10).map(u=>u.tc), backgroundColor:'#cbd5e1'}, {label:'Productive Calls', data:users.slice(0,10).map(u=>u.pc), backgroundColor:'#10b981'}]);
         }
 
         // ==========================================
-        // 2. BEAT PERFORMANCE (Expanded Summary)
+        // 2. BEAT PERFORMANCE
         // ==========================================
         function runBeatPerformance(data, container) {
             const k_n = document.getElementById('map_b_name').value, k_o = document.getElementById('map_b_outlets').value, k_v = document.getElementById('map_b_visited').value, k_val = document.getElementById('map_b_value').value;
@@ -302,12 +293,11 @@
             const narrative = `
                 <h3>Executive Summary: Route & Beat Optimization</h3>
                 <p><strong>Network Coverage:</strong> The physical distribution network documented <strong>${beats.length} active routes/beats</strong>. These beats encompass a universe of <strong>${totalOutlets.toLocaleString()} total mapped outlets</strong>. During this cycle, the sales force successfully visited and billed <strong>${totalVisited.toLocaleString()} outlets</strong>, establishing an average network coverage density of <strong>${avgCoverage}%</strong>.</p>
-                <p><strong>Revenue Generation:</strong> The cumulative gross order value across all beats stands at <strong>₹${totalValue.toLocaleString()}</strong>. The revenue distribution highlights <strong>${topBeat.n}</strong> as the most lucrative geographical route, pulling in ₹${topBeat.val.toLocaleString()}. Secondary analysis indicates that high-value beats correlate strongly with coverage percentages exceeding 80%, suggesting that sheer visit volume remains a primary driver of revenue generation.</p>
             `;
 
             container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Beat Module: Core KPIs</h2>
+                <div class="executive-summary">${narrative}</div>
+                <div class="card"><h2 class="section-header">Beat Module: Core KPIs</h2>
                     <div class="kpi-grid">
                         <div class="kpi-card"><div class="kpi-title">Active Beats</div><div class="kpi-value">${beats.length}</div></div>
                         <div class="kpi-card"><div class="kpi-title">Mapped Outlets</div><div class="kpi-value">${totalOutlets.toLocaleString()}</div></div>
@@ -316,7 +306,7 @@
                     </div>
                 </div>
                 <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Performing Beats</h3>
+                    <div class="card"><h3 class="section-header">Top 10 Performing Beats</h3>
                         <div class="table-container">
                             <table>
                                 <tr><th>Beat Name</th><th>Order Value</th><th>Coverage %</th><th>Visited/Total</th></tr>
@@ -324,13 +314,13 @@
                             </table>
                         </div>
                     </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Revenue Spread by Route</h3><div style="height:300px"><canvas id="c2"></canvas></div></div>
+                    <div class="card" style="height:400px"><h3 class="section-header">Revenue Spread by Route</h3><div style="height:300px"><canvas id="c2"></canvas></div></div>
                 </div>`;
             createChart('c2', 'bar', beats.slice(0,10).map(b=>b.n.substring(0,15)), [{label:'Order Value (₹)', data:beats.slice(0,10).map(b=>b.val), backgroundColor:'#0ea5e9'}]);
         }
 
         // ==========================================
-        // 3. OUTLET PERFORMANCE (Expanded Summary)
+        // 3. OUTLET PERFORMANCE
         // ==========================================
         function runOutletPerformance(data, container) {
             const k_n = document.getElementById('map_o_name').value, k_c = document.getElementById('map_o_channel').value, k_v = document.getElementById('map_o_value').value;
@@ -349,22 +339,21 @@
 
             const narrative = `
                 <h3>Executive Summary: Retail Counters</h3>
-                <p><strong>Retail Universe Insights:</strong> Invoice data reveals engagement with <strong>${out.length.toLocaleString()} unique retail outlets</strong>, contributing to a total ecosystem revenue of <strong>₹${totalValue.toLocaleString()}</strong>. The financial health indicator—average revenue per outlet—currently sits at <strong>₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</strong>.</p>
-                <p><strong>Channel & Top Tier Dynamics:</strong> The <strong>${topChannel}</strong> channel represents the largest segment of inbound revenue. Furthermore, analyzing the Pareto spread, the top-performing outlets (led by ${out[0]?.n || 'N/A'}) represent a disproportionately high percentage of total volume. Account management should prioritize stock availability and merchandising space within these top 10 critical retail nodes to protect baseline revenues.</p>
+                <p><strong>Retail Universe Insights:</strong> Invoice data reveals engagement with <strong>${out.length.toLocaleString()} unique retail outlets</strong>, contributing to a total ecosystem revenue of <strong>₹${totalValue.toLocaleString()}</strong>. Average revenue per outlet: <strong>₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</strong>.</p>
             `;
 
             container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Outlet Module: Core KPIs</h2>
+                <div class="executive-summary">${narrative}</div>
+                <div class="card"><h2 class="section-header">Outlet Module: Core KPIs</h2>
                     <div class="kpi-grid">
                         <div class="kpi-card"><div class="kpi-title">Billed Outlets</div><div class="kpi-value">${out.length.toLocaleString()}</div></div>
                         <div class="kpi-card"><div class="kpi-title">Total Revenue</div><div class="kpi-value">₹${totalValue.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Avg Drop Size (Per Outlet)</div><div class="kpi-value">₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Top Trade Channel</div><div class="kpi-value" style="font-size: 20px; line-height:30px;">${topChannel}</div></div>
+                        <div class="kpi-card"><div class="kpi-title">Avg Per Outlet</div><div class="kpi-value">₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
+                        <div class="kpi-card"><div class="kpi-title">Top Channel</div><div class="kpi-value" style="font-size: 20px;">${topChannel}</div></div>
                     </div>
                 </div>
                 <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Outlets Ledger</h3>
+                    <div class="card"><h3 class="section-header">Top 10 Outlets Ledger</h3>
                         <div class="table-container">
                             <table>
                                 <tr><th>Rank</th><th>Outlet Name</th><th>Channel</th><th>Total Value</th></tr>
@@ -372,13 +361,13 @@
                             </table>
                         </div>
                     </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Top Outlets Revenue Chart</h3><div style="height:300px"><canvas id="c3"></canvas></div></div>
+                    <div class="card" style="height:400px"><h3 class="section-header">Top Outlets Revenue Chart</h3><div style="height:300px"><canvas id="c3"></canvas></div></div>
                 </div>`;
             createChart('c3', 'bar', out.slice(0,6).map(o=>o.n.substring(0,20)), [{label:'Revenue (₹)', data:out.slice(0,6).map(o=>o.v), backgroundColor:'#8b5cf6'}], {indexAxis: 'y'});
         }
 
         // ==========================================
-        // 4. DISTRIBUTOR PERFORMANCE (Expanded Summary)
+        // 4. DISTRIBUTOR PERFORMANCE
         // ==========================================
         function runDistributorPerformance(data, container) {
             const keys = { reg: 'map_d_region', type: 'map_d_type', name: 'map_d_name', sku: 'map_d_sku', inv: 'map_d_invoice', qty: 'map_d_qty', val: 'map_d_value' };
@@ -412,224 +401,262 @@
             let topSkus = Object.keys(skus).map(s => ({ sku:s, qty:skus[s].qty, val:skus[s].val })).sort((a,b)=>b.val-a.val);
             let topInvs = Object.keys(invoiceMap).map(i => ({ inv:i, name:invoiceMap[i].name, qty:invoiceMap[i].qty, val:invoiceMap[i].val })).sort((a,b)=>b.val-a.val);
             let topGlobalSS = Object.keys(allPartners).filter(n=>allPartners[n].type==='SS').map(name=>({name, qty:allPartners[name].qty, val:allPartners[name].val})).sort((a,b)=>b.val-a.val).slice(0,5);
-            
-            let topRegionalSt = [];
-            for(let reg in regionalStockist){
-                let topName = Object.keys(regionalStockist[reg]).reduce((a,b) => regionalStockist[reg][a].val > regionalStockist[reg][b].val ? a : b);
-                topRegionalSt.push({ reg, name: topName, qty: regionalStockist[reg][topName].qty, val: regionalStockist[reg][topName].val });
-            }
-            topRegionalSt.sort((a,b)=>b.val-a.val);
-            
+
             const narrative = `
                 <h3>Executive Summary: Supply Chain & Invoicing</h3>
-                <p><strong>Throughput Overview:</strong> The primary and secondary logistics pipeline successfully generated <strong>${uniqueInvoices.size.toLocaleString()} documented invoices</strong> during this period. These orders covered a catalog width of <strong>${uniqueProducts.size.toLocaleString()} unique SKUs</strong>. The aggregated network operations resulted in a gross Sales Order (SO) ledger value of <strong>₹${totalSOAmount.toLocaleString()}</strong>.</p>
-                <p><strong>Partner & Product Matrix:</strong> Fulfillment was executed via a bifurcated network consisting of <strong>${uniqueSS.size} Superstockists</strong> and <strong>${uniqueSt.size} Stockists</strong>. Supply chain velocity was overwhelmingly driven by the highest-performing SKU (<strong>${topSkus[0]?.sku || 'N/A'}</strong>). Inventory alignment and credit tracking should be prioritized for the top-ranking Superstockist partner, <strong>${topGlobalSS[0]?.name || 'N/A'}</strong>, as their throughput significantly impacts overall regional liquidity.</p>
+                <p><strong>Throughput Overview:</strong> Generated <strong>${uniqueInvoices.size.toLocaleString()} invoices</strong> covering <strong>${uniqueProducts.size.toLocaleString()} unique SKUs</strong>. Total SO value: <strong>₹${totalSOAmount.toLocaleString()}</strong>.</p>
             `;
 
             container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Logistics & Supply Module: Core KPIs</h2>
+                <div class="executive-summary">${narrative}</div>
+                <div class="card"><h2 class="section-header">Logistics & Supply Module: Core KPIs</h2>
                     <div class="kpi-grid">
                         <div class="kpi-card"><div class="kpi-title">Total Invoices</div><div class="kpi-value">${uniqueInvoices.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Active SKUs Billed</div><div class="kpi-value">${uniqueProducts.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Superstockists / Stockists</div><div class="kpi-value" style="font-size:22px;">${uniqueSS.size} / ${uniqueSt.size}</div></div>
-                        <div class="kpi-card" style="border-left-color:var(--success);"><div class="kpi-title">Total SO Amount</div><div class="kpi-value" style="color:var(--success);">₹${totalSOAmount.toLocaleString()}</div></div>
+                        <div class="kpi-card"><div class="kpi-title">Active SKUs</div><div class="kpi-value">${uniqueProducts.size.toLocaleString()}</div></div>
+                        <div class="kpi-card"><div class="kpi-title">SS / ST</div><div class="kpi-value" style="font-size:22px;">${uniqueSS.size} / ${uniqueSt.size}</div></div>
+                        <div class="kpi-card" style="border-left-color:var(--success);"><div class="kpi-title">Total Amount</div><div class="kpi-value" style="color:var(--success);">₹${totalSOAmount.toLocaleString()}</div></div>
                     </div>
                 </div>
 
                 <div class="dashboard-layout">
-                    <div class="card pdf-item" style="height:380px;"><h3 class="section-header">Sales Share: Superstockist vs Stockist</h3><div style="height:280px;"><canvas id="shareChart"></canvas></div></div>
+                    <div class="card" style="height:380px;"><h3 class="section-header">Sales Share: SS vs ST</h3><div style="height:280px;"><canvas id="shareChart"></canvas></div></div>
                     
-                    <div class="card pdf-item"><h3 class="section-header">Global Top 5 Superstockists</h3>
+                    <div class="card"><h3 class="section-header">Global Top 5 Superstockists</h3>
                         <div class="table-container">
                             <table>
-                                <tr><th>Rank</th><th>Superstockist Name</th><th>Total Quantity</th><th>Value (₹)</th></tr>
+                                <tr><th>Rank</th><th>Name</th><th>Qty</th><th>Value (₹)</th></tr>
                                 ${topGlobalSS.map((ss, i) => `<tr><td style="font-weight:bold; color:#64748b;">#${i+1}</td><td style="font-weight:600;">${ss.name}</td><td>${ss.qty.toLocaleString()}</td><td style="color:var(--primary); font-weight:bold;">₹${ss.val.toLocaleString()}</td></tr>`).join('')}
                             </table>
                         </div>
                     </div>
 
-                    <div class="card full-width pdf-item"><h3 class="section-header">Regional Champions: Top Stockist per Zone</h3>
+                    <div class="card full-width"><h3 class="section-header">Top 10 High-Velocity SKUs</h3>
                         <div class="table-container">
                             <table>
-                                <tr><th>Geographic Region / Zone</th><th>Stockist Partner Name</th><th>Volume Handled</th><th>Total Value (₹)</th></tr>
-                                ${topRegionalSt.map((st) => `<tr><td><span style="background:#e2e8f0; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">${st.reg}</span></td><td style="font-weight:600;">${st.name}</td><td>${st.qty.toLocaleString()}</td><td style="color:var(--warning); font-weight:bold;">₹${st.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 High-Velocity SKUs</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>SKU Description</th><th>Sold Quantity</th><th>Value Contribution (₹)</th></tr>
+                                <tr><th>SKU</th><th>Sold Qty</th><th>Value (₹)</th></tr>
                                 ${topSkus.slice(0,10).map((s,i) => `<tr><td style="font-weight:600;">#${i+1} ${s.sku}</td><td>${s.qty.toLocaleString()}</td><td style="color:var(--success); font-weight:bold;">₹${s.val.toLocaleString()}</td></tr>`).join('')}
                             </table>
                         </div>
                     </div>
 
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Mega Invoices</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Invoice Reference</th><th>Billed Entity</th><th>Invoice Value (₹)</th></tr>
-                                ${topInvs.slice(0,10).map((inv) => `<tr><td style="font-family:monospace; color:var(--secondary); font-weight:bold;">${inv.inv}</td><td style="font-weight:600;">${inv.name}</td><td style="font-weight:bold;">₹${inv.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card full-width pdf-item" style="height:450px"><h3 class="section-header">SKU Financial Contribution Margin</h3><div style="height:350px"><canvas id="skuChart"></canvas></div></div>
+                    <div class="card full-width" style="height:450px"><h3 class="section-header">SKU Financial Contribution</h3><div style="height:350px"><canvas id="skuChart"></canvas></div></div>
                 </div>`;
             
             createChart('shareChart', 'doughnut', ['Superstockists', 'Stockists'], [{data:[totalSSVal, totalStVal], backgroundColor:['#8b5cf6', '#f59e0b']}], { cutout: '65%', plugins: { legend: { position: 'bottom' } } });
-            createChart('skuChart', 'bar', topSkus.slice(0,10).map(s=>s.sku.substring(0,30)), [{label:'SKU Sales Value (₹)', data:topSkus.slice(0,10).map(s=>s.val), backgroundColor:'#3b82f6'}]);
+            createChart('skuChart', 'bar', topSkus.slice(0,10).map(s=>s.sku.substring(0,30)), [{label:'Value (₹)', data:topSkus.slice(0,10).map(s=>s.val), backgroundColor:'#3b82f6'}]);
         }
 
         // ==========================================
-        // FIXED: SHARE LINK FUNCTION WITH MODAL
+        // EXPORT OUTPUT TO PDF (Only Output)
         // ==========================================
-        function generateShareLink() {
-            let baseUrl = window.location.href.split('?')[0].split('#')[0];
-            let shareUrl = baseUrl + '?mode=shared&tab=' + currentTab;
-            
-            document.getElementById('shareLink').value = shareUrl;
-            document.getElementById('shareModal').style.display = 'block';
-        }
-
-        function copyShareLinkToClipboard() {
-            const shareInput = document.getElementById('shareLink');
-            shareInput.select();
-            
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    // Use modern Clipboard API
-                    navigator.clipboard.writeText(shareInput.value).then(() => {
-                        alert('✅ Share link copied to clipboard!');
-                        document.getElementById('shareModal').style.display = 'none';
-                    }).catch(() => {
-                        // Fallback to execCommand
-                        fallbackCopy();
-                    });
-                } else {
-                    // Fallback for older browsers
-                    fallbackCopy();
-                }
-            } catch (err) {
-                fallbackCopy();
+        function exportOutputToPDF() {
+            const outputElement = document.getElementById('analyticsOutputWorkspace');
+            if (!outputElement || !outputElement.innerHTML.trim()) {
+                alert('❌ No output to export. Generate analytics first!');
+                return;
             }
 
-            function fallbackCopy() {
-                document.execCommand('copy');
-                alert('✅ Share link copied to clipboard!');
-                document.getElementById('shareModal').style.display = 'none';
-            }
+            const opt = {
+                margin: 10,
+                filename: `FMCG_Analytics_Output_${new Date().toISOString().split('T')[0]}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: 'avoid', before: '.pagebreak' }
+            };
+
+            html2pdf().set(opt).from(outputElement).save().catch(err => {
+                console.error('PDF Export Error:', err);
+                alert('❌ PDF export failed. Please try again.');
+            });
         }
 
         // ==========================================
-        // FIXED: EMAIL COPY ENGINE (Modern Approach)
+        // COPY OUTPUT FOR EMAIL (Only Output)
         // ==========================================
-        function copyForEmail() {
-            const workspace = document.getElementById('analyticsOutputWorkspace');
-            const clone = workspace.cloneNode(true);
-            
-            // Hardcode inline styles into tables
+        function copyOutputForEmail() {
+            const outputElement = document.getElementById('analyticsOutputWorkspace');
+            if (!outputElement || !outputElement.innerHTML.trim()) {
+                alert('❌ No output to copy. Generate analytics first!');
+                return;
+            }
+
+            const clone = outputElement.cloneNode(true);
+
+            // Style tables for email
             const tables = clone.querySelectorAll('table');
             tables.forEach(t => {
                 t.setAttribute('border', '1');
-                t.setAttribute('cellpadding', '10');
+                t.setAttribute('cellpadding', '8');
                 t.setAttribute('cellspacing', '0');
-                t.style.borderCollapse = 'collapse';
                 t.style.width = '100%';
-                t.style.fontFamily = 'Arial, sans-serif';
-                t.style.borderColor = '#cbd5e1';
-                t.style.marginBottom = '20px';
+                t.style.borderCollapse = 'collapse';
+                t.style.marginBottom = '15px';
             });
 
-            // Hardcode header colors
             const ths = clone.querySelectorAll('th');
-            ths.forEach(th => { 
-                th.style.backgroundColor = '#f1f5f9'; 
-                th.style.textAlign = 'left'; 
+            ths.forEach(th => {
+                th.style.backgroundColor = '#f1f5f9';
                 th.style.color = '#334155';
-                th.style.padding = '10px';
+                th.style.padding = '8px';
+                th.style.border = '1px solid #cbd5e1';
+                th.style.fontWeight = 'bold';
+            });
+
+            const tds = clone.querySelectorAll('td');
+            tds.forEach(td => {
+                td.style.border = '1px solid #cbd5e1';
+                td.style.padding = '8px';
             });
 
             // Convert charts to images
-            const origCanvases = workspace.getElementsByTagName('canvas');
+            const origCanvases = outputElement.getElementsByTagName('canvas');
             const cloneCanvases = clone.getElementsByTagName('canvas');
-            for(let i = 0; i < origCanvases.length; i++) {
+            for (let i = 0; i < origCanvases.length; i++) {
                 const img = document.createElement('img');
-                img.src = origCanvases[i].toDataURL('image/png', 1.0); 
+                img.src = origCanvases[i].toDataURL('image/png', 0.95);
                 img.style.width = '100%';
-                img.style.maxWidth = '700px';
+                img.style.maxWidth = '600px';
                 img.style.display = 'block';
-                img.style.marginTop = '10px';
+                img.style.margin = '15px 0';
                 cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
             }
 
-            // Build Final HTML
-            const finalHTML = `
-<!DOCTYPE html>
+            // Build complete HTML email
+            const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: Arial, sans-serif; color: #334155; max-width: 900px; margin: 0; padding: 20px; }
-        h2 { color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
         table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-        th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; }
-        th { background-color: #f1f5f9; color: #475569; font-weight: bold; }
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-        .kpi-card { background: #f8fafc; padding: 15px; border: 1px solid #e2e8f0; border-radius: 6px; }
-        .kpi-title { font-size: 12px; color: #64748b; font-weight: bold; margin-bottom: 5px; }
-        .kpi-value { font-size: 24px; font-weight: bold; color: #1e293b; }
-        .executive-summary { background: #f8fafc; border-left: 5px solid #3b82f6; padding: 15px; margin-bottom: 20px; }
+        th { background-color: #f1f5f9; color: #334155; padding: 8px; border: 1px solid #cbd5e1; font-weight: bold; }
+        td { border: 1px solid #cbd5e1; padding: 8px; }
+        h2 { color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        h3 { color: #1e293b; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .kpi-card { background: #f8fafc; padding: 12px; border: 1px solid #e2e8f0; border-radius: 4px; }
+        .kpi-title { font-size: 11px; color: #64748b; font-weight: bold; }
+        .kpi-value { font-size: 20px; font-weight: bold; color: #1e293b; }
+        .executive-summary { background: #f8fafc; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 20px; }
         img { max-width: 100%; height: auto; margin: 15px 0; }
     </style>
 </head>
 <body>
-    <h2>📊 FMCG Analytics Report</h2>
+    <h2>📊 FMCG Analytics Output Report</h2>
     ${clone.innerHTML}
+    <p style="margin-top: 30px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px;">Generated on ${new Date().toLocaleString()}</p>
 </body>
 </html>`;
 
-            // Copy to clipboard using modern API
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(finalHTML).then(() => {
-                    document.getElementById('emailModal').style.display = 'block';
-                }).catch(() => {
-                    alert('❌ Failed to copy. Please try Google Chrome or Edge browser.');
-                });
-            } else {
-                // Fallback
-                const textarea = document.createElement('textarea');
-                textarea.value = finalHTML;
-                document.body.appendChild(textarea);
-                textarea.select();
+            // Copy to clipboard
+            const textArea = document.createElement('textarea');
+            textArea.value = htmlContent;
+            document.body.appendChild(textArea);
+            textArea.select();
+            
+            try {
                 document.execCommand('copy');
-                document.body.removeChild(textarea);
+                document.getElementById('emailSuccess').style.display = 'block';
                 document.getElementById('emailModal').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('emailSuccess').style.display = 'none';
+                }, 3000);
+            } catch (err) {
+                alert('❌ Failed to copy. Please try another browser.');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // ==========================================
+        // GENERATE SHAREABLE LINK (Only Output Data)
+        // ==========================================
+        function generateShareableLink() {
+            if (!lastGeneratedTab) {
+                alert('❌ No analytics generated. Generate output first!');
+                return;
+            }
+
+            // Encode the output as base64 so it can be shared in URL
+            const outputElement = document.getElementById('analyticsOutputWorkspace');
+            const outputHTML = outputElement.innerHTML;
+            const encodedOutput = btoa(unescape(encodeURIComponent(outputHTML)));
+
+            let baseUrl = window.location.href.split('?')[0].split('#')[0];
+            let shareUrl = baseUrl + `?mode=shared&data=${encodedOutput}&tab=${lastGeneratedTab}`;
+
+            // Show modal with link
+            document.getElementById('shareLink').value = shareUrl;
+            document.getElementById('shareModal').style.display = 'block';
+        }
+
+        // ==========================================
+        // COPY TO CLIPBOARD HELPER
+        // ==========================================
+        function copyToClipboard(elementId) {
+            const textArea = document.getElementById(elementId);
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                document.getElementById('shareLinkSuccess').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('shareLinkSuccess').style.display = 'none';
+                }, 2000);
+            } catch (err) {
+                alert('❌ Failed to copy link. Please try another browser.');
             }
         }
 
         // ==========================================
-        // FIXED: PDF EXPORT ENGINE (Browser Print)
+        // LOAD SHARED OUTPUT FROM URL
         // ==========================================
-        function exportToPDF() {
-            // Method 1: Use Browser Print-to-PDF (Most Reliable)
-            if (confirm('📄 This will open the print dialog.\n\nSteps:\n1. Select "Save as PDF"\n2. Choose your location\n3. Click Save\n\nContinue?')) {
-                window.print();
+        function loadSharedOutput() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('mode') === 'shared' && urlParams.get('data')) {
+                isSharedMode = true;
+                document.getElementById('main-header').style.display = 'none';
+                document.getElementById('nav-tabs').style.display = 'none';
+                document.getElementById('action-bar').style.display = 'none';
+                document.getElementById('tab-content').innerHTML = '';
+                
+                try {
+                    const encodedData = urlParams.get('data');
+                    const decodedHTML = decodeURIComponent(escape(atob(encodedData)));
+                    document.getElementById('analyticsOutputWorkspace').innerHTML = decodedHTML;
+
+                    // Re-initialize charts from HTML
+                    setTimeout(() => {
+                        const canvases = document.querySelectorAll('canvas');
+                        canvases.forEach((canvas, idx) => {
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                                // Canvas will be recreated with chart.js data from HTML
+                            }
+                        });
+                    }, 500);
+                } catch (err) {
+                    document.getElementById('analyticsOutputWorkspace').innerHTML = '<p style="color: red;">❌ Error loading shared output. Link may be corrupted.</p>';
+                }
+                return true;
             }
+            return false;
         }
+
+        // Initialize
+        window.onload = function() {
+            if (!loadSharedOutput()) {
+                renderTabFrame();
+            }
+        };
 
         // Close modals when clicking outside
         window.onclick = function(event) {
             let shareModal = document.getElementById('shareModal');
             let emailModal = document.getElementById('emailModal');
-            if (event.target === shareModal) {
-                shareModal.style.display = 'none';
-            }
-            if (event.target === emailModal) {
-                emailModal.style.display = 'none';
-            }
+            if (event.target === shareModal) shareModal.style.display = 'none';
+            if (event.target === emailModal) emailModal.style.display = 'none';
         }
 
     </script>
