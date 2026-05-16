@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FMCG Field Analytics Dashboard</title>
-    <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -61,12 +60,18 @@
 
         #action-bar { display: none; margin-bottom: 25px; background: white; padding: 20px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
 
-        /* Robust invisible container strictly for copying HTML to email */
-        #email-copy-container {
-            position: fixed; top: 0; left: 0; width: 1px; height: 1px;
-            padding: 0; margin: 0; border: 0; outline: none; box-shadow: none;
-            background: transparent; opacity: 0.0001; pointer-events: none;
-            overflow: hidden; z-index: -1;
+        /* Full Screen Overlay for Email Copy Fallback */
+        #email-modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(241, 245, 249, 0.98); z-index: 99999; overflow-y: auto;
+        }
+        #email-modal-header {
+            background: white; padding: 20px; text-align: center; border-bottom: 3px solid var(--secondary);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 100000;
+        }
+        #email-content-area {
+            background: white; max-width: 900px; margin: 40px auto; padding: 40px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-radius: 8px;
         }
     </style>
 </head>
@@ -78,7 +83,6 @@
     </header>
 
     <div class="container">
-        <!-- Navigation Tabs -->
         <div class="tabs" id="nav-tabs">
             <button class="tab-btn active" onclick="switchTab('user-perf')">👤 User-Wise Performance</button>
             <button class="tab-btn" onclick="switchTab('beat-perf')">📍 Beat Performance</button>
@@ -88,7 +92,6 @@
         
         <div id="tab-content"></div>
 
-        <!-- Action Bar (Exports & Sharing) -->
         <div id="action-bar">
             <button class="btn btn-pdf" onclick="exportToPDF()">📄 Export to PDF (1 Per Page)</button>
             <button class="btn btn-email" onclick="copyForEmail()">✉️ Copy for Email (Rich HTML)</button>
@@ -98,8 +101,16 @@
         <div id="analyticsOutputWorkspace" style="padding-bottom: 20px;"></div>
     </div>
 
-    <!-- Hidden element strictly for Email Copying -->
-    <div id="email-copy-container"></div>
+    <div id="email-modal-overlay">
+        <div id="email-modal-header">
+            <h2 style="margin: 0 0 10px 0; color: #1e293b;">Report Generated for Email</h2>
+            <p style="margin: 0 0 15px 0; color: #ef4444; font-weight: bold; font-size: 16px;">
+                We have highlighted your report below. If it didn't copy automatically, press <strong>Ctrl+C</strong> now!
+            </p>
+            <button class="btn" onclick="closeEmailModal()" style="background: #ef4444;">Close Window</button>
+        </div>
+        <div id="email-content-area"></div>
+    </div>
 
     <script>
         let currentTab = 'user-perf';
@@ -114,10 +125,12 @@
             'dist-perf': { title: 'Distributor, SKU & Invoice Tracking', mappings: [{ id: 'd_region', label: 'Region / Zone' }, { id: 'd_type', label: 'Type (Superstockist/Stockist)' }, { id: 'd_name', label: 'Partner Name' }, { id: 'd_sku', label: 'SKU Name' }, { id: 'd_invoice', label: 'Invoice No.' }, { id: 'd_qty', label: 'Billed Quantity' }, { id: 'd_value', label: 'Billed Value' }] }
         };
 
+        // Initialize App & Check for Shared Mode
         window.onload = function() { 
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('mode') === 'shared') {
                 isSharedMode = true;
+                // Hide Header and Tabs in Shared Mode
                 document.getElementById('main-header').style.display = 'none';
                 document.getElementById('nav-tabs').style.display = 'none';
                 
@@ -137,7 +150,7 @@
             renderTabFrame();
         }
 
-        // REMOVED .pdf-item class from the upload/mapping cards to fix PDF issue
+        // Note: No .pdf-item class here so it doesn't get printed
         function renderTabFrame() {
             const config = modulesConfig[currentTab];
             let html = `
@@ -167,7 +180,7 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // REMOVED .pdf-item class from the mapping matrix to fix PDF issue
+        // Note: No .pdf-item class here so it doesn't get printed
         function renderMappingMatrix(headers) {
             let html = `<div class="card"><h3 class="section-header">⚙️ Map Sheet Columns</h3><div class="mapping-container">`;
             modulesConfig[currentTab].mappings.forEach(f => {
@@ -202,7 +215,7 @@
         }
 
         // ==========================================
-        // 1. USER PERFORMANCE (Expanded Summary)
+        // 1. USER PERFORMANCE
         // ==========================================
         function runUserPerformance(data, container) {
             const k_n = document.getElementById('map_u_name').value, k_c = document.getElementById('map_u_calls').value, k_p = document.getElementById('map_u_pcalls').value;
@@ -247,7 +260,7 @@
         }
 
         // ==========================================
-        // 2. BEAT PERFORMANCE (Expanded Summary)
+        // 2. BEAT PERFORMANCE
         // ==========================================
         function runBeatPerformance(data, container) {
             const k_n = document.getElementById('map_b_name').value, k_o = document.getElementById('map_b_outlets').value, k_v = document.getElementById('map_b_visited').value, k_val = document.getElementById('map_b_value').value;
@@ -292,7 +305,7 @@
         }
 
         // ==========================================
-        // 3. OUTLET PERFORMANCE (Expanded Summary)
+        // 3. OUTLET PERFORMANCE
         // ==========================================
         function runOutletPerformance(data, container) {
             const k_n = document.getElementById('map_o_name').value, k_c = document.getElementById('map_o_channel').value, k_v = document.getElementById('map_o_value').value;
@@ -340,7 +353,7 @@
         }
 
         // ==========================================
-        // 4. DISTRIBUTOR PERFORMANCE (Expanded Summary)
+        // 4. DISTRIBUTOR PERFORMANCE
         // ==========================================
         function runDistributorPerformance(data, container) {
             const keys = { reg: 'map_d_region', type: 'map_d_type', name: 'map_d_name', sku: 'map_d_sku', inv: 'map_d_invoice', qty: 'map_d_qty', val: 'map_d_value' };
@@ -446,7 +459,7 @@
         }
 
         // ==========================================
-        // SHARE LINK FUNCTION
+        // SHARE LINK
         // ==========================================
         async function generateShareLink() {
             let baseUrl = window.location.href.split('?')[0].split('#')[0];
@@ -469,35 +482,40 @@
         }
 
         // ==========================================
-        // 100% FIXED EXPORT ENGINES
+        // 1. PERFECT PDF EXPORT (1 item per page)
         // ==========================================
-        
-        // --- 1. PDF ENGINE: Restricts to ONLY Output & Forces 1 Item per page ---
         function exportToPDF() {
+            // Create a completely disconnected print wrapper to destroy CSS flex/grid layout rules
             const printDiv = document.createElement('div');
-            printDiv.style.width = '1000px'; 
+            printDiv.style.width = '800px';  // Matches standard A4 Portrait aspect ratio
             printDiv.style.background = '#ffffff';
-            printDiv.style.padding = '10px';
 
             const items = document.querySelectorAll('.pdf-item');
-            
             if (items.length === 0) {
-                alert("Please upload and generate data first.");
+                alert("Please generate analytics first.");
                 return;
             }
 
             items.forEach((item, index) => {
+                // Wrapper to enforce strict page breaks
+                const pageWrapper = document.createElement('div');
+                pageWrapper.style.padding = '20px';
+                pageWrapper.style.boxSizing = 'border-box';
+                
+                if (index > 0) {
+                    pageWrapper.style.pageBreakBefore = 'always';
+                }
+
                 const clone = item.cloneNode(true);
                 
-                // Break CSS constraints
+                // Break CSS layout constraints on the clone
                 clone.style.display = 'block';
-                clone.style.width = '96%';
+                clone.style.width = '100%';
                 clone.style.margin = '0 auto';
                 clone.style.boxShadow = 'none';
                 clone.style.border = '1px solid #e2e8f0';
-                clone.style.marginBottom = '20px';
                 
-                // Convert charts to images
+                // Convert live canvas to static images
                 const origCanvases = item.getElementsByTagName('canvas');
                 const cloneCanvases = clone.getElementsByTagName('canvas');
                 for (let i = 0; i < origCanvases.length; i++) {
@@ -508,29 +526,30 @@
                     cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
                 }
 
-                printDiv.appendChild(clone);
-
-                // Inject a hard page-break block after every item
-                if (index < items.length - 1) {
-                    const pageBreak = document.createElement('div');
-                    pageBreak.classList.add('html2pdf__page-break');
-                    printDiv.appendChild(pageBreak);
-                }
+                pageWrapper.appendChild(clone);
+                printDiv.appendChild(pageWrapper);
             });
 
             const opt = {
-                margin:       10,
+                margin:       10, // 10mm margin
                 filename:     `FMCG_Analytics_Export.pdf`,
                 image:        { type: 'jpeg', quality: 1.0 },
                 html2canvas:  { scale: 2, useCORS: true, letterRendering: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' },
-                pagebreak:    { mode: ['css', 'legacy'] }
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' } // Portrait prevents width cutoff
             };
             
             html2pdf().set(opt).from(printDiv).save();
         }
 
-        // --- 2. EMAIL ENGINE: Aggressive inline styling and dual-fallback copy ---
+        // ==========================================
+        // 2. BULLETPROOF EMAIL COPY
+        // ==========================================
+        function closeEmailModal() {
+            document.getElementById('email-modal-overlay').style.display = 'none';
+            // Clear selection
+            if (window.getSelection) { window.getSelection().removeAllRanges(); }
+        }
+
         async function copyForEmail() {
             const workspace = document.getElementById('analyticsOutputWorkspace');
             if (!workspace || workspace.innerHTML.trim() === '') {
@@ -540,7 +559,7 @@
 
             const clone = workspace.cloneNode(true);
             
-            // Hardcode inline styles into tables so email clients read them
+            // Aggressively inject inline CSS into tables for Outlook/Gmail support
             const tables = clone.querySelectorAll('table');
             tables.forEach(t => {
                 t.setAttribute('border', '1');
@@ -583,42 +602,35 @@
                     ${clone.innerHTML}
                 </div>`;
 
-            // Try modern secure clipboard API
-            if (navigator.clipboard && window.ClipboardItem && window.isSecureContext) {
-                try {
-                    const htmlBlob = new Blob([finalHTML], { type: 'text/html' });
-                    const textBlob = new Blob([clone.innerText], { type: 'text/plain' });
-                    await navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })]);
-                    alert("✅ Rich HTML successfully copied! Open your Email client (Gmail/Outlook) and paste.");
-                    return;
-                } catch (err) {
-                    console.warn("Clipboard API failed, attempting fallback.");
-                }
-            }
+            // Step 1: Open the visible modal & populate it
+            const modal = document.getElementById('email-modal-overlay');
+            const contentArea = document.getElementById('email-content-area');
+            contentArea.innerHTML = finalHTML;
+            modal.style.display = 'block';
 
-            // Fallback for file:// or unsecure HTTP
-            const hiddenContainer = document.getElementById('email-copy-container');
-            hiddenContainer.innerHTML = finalHTML;
-            
+            // Step 2: Automatically select the text using the native window selector
             const range = document.createRange();
-            range.selectNodeContents(hiddenContainer);
+            range.selectNodeContents(contentArea);
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            
+
+            // Step 3: Automatically trigger the copy command
             try {
                 const successful = document.execCommand('copy');
                 if(successful) {
-                    alert("✅ Rich HTML successfully copied! Open your Email client (Gmail/Outlook) and paste.");
+                    // Small delay to let user see it happen, then alert
+                    setTimeout(() => {
+                        alert("✅ The report has been successfully copied to your clipboard!\n\nYou can now Close this window and paste (Ctrl+V) directly into Gmail or Outlook.");
+                    }, 100);
                 } else {
-                    throw new Error("Fallback failed");
+                    throw new Error("Browser blocked automatic execCommand");
                 }
             } catch (err) {
-                alert("❌ Browser security blocked the copy action. Please run this tool over HTTPS or on a local web server to copy images.");
+                // If it fails, the text is still perfectly highlighted on screen. 
+                // The user just presses Ctrl+C as instructed by the red header text.
+                console.warn("Auto-copy blocked. User must press Ctrl+C manually.");
             }
-            
-            sel.removeAllRanges();
-            hiddenContainer.innerHTML = '';
         }
     </script>
 </body>
