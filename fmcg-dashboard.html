@@ -60,7 +60,7 @@
 
         #action-bar { display: none; margin-bottom: 25px; background: white; padding: 20px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
 
-        /* Full Screen Overlay for Email Copy Fallback */
+        /* Email Modal Styles */
         #email-modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(241, 245, 249, 0.98); z-index: 99999; overflow-y: auto;
@@ -73,6 +73,26 @@
             background: white; max-width: 900px; margin: 40px auto; padding: 40px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-radius: 8px;
         }
+
+        /* Share Link Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 20px 25px rgba(0,0,0,0.15); max-width: 500px; width: 90%; }
+        .modal-header { font-size: 20px; font-weight: 700; color: var(--primary); margin-bottom: 20px; }
+        .modal-body { margin-bottom: 20px; }
+        .share-input { width: 100%; padding: 12px; border: 2px solid var(--border); border-radius: 6px; font-size: 14px; font-family: monospace; }
+        .modal-footer { display: flex; gap: 10px; }
+        .modal-footer button { flex: 1; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        .btn-close-modal { background: #e2e8f0; color: #334155; }
+        .btn-copy-link { background: var(--secondary); color: white; }
+
+        /* Print Styles */
+        @media print {
+            body, html { margin: 0; padding: 0; }
+            .tabs, #action-bar, header { display: none !important; }
+            .container { padding: 0; margin: 0; }
+            .card { page-break-inside: avoid; box-shadow: none; border: 1px solid #ddd; }
+        }
     </style>
 </head>
 <body>
@@ -83,6 +103,7 @@
     </header>
 
     <div class="container">
+        <!-- Navigation Tabs -->
         <div class="tabs" id="nav-tabs">
             <button class="tab-btn active" onclick="switchTab('user-perf')">👤 User-Wise Performance</button>
             <button class="tab-btn" onclick="switchTab('beat-perf')">📍 Beat Performance</button>
@@ -92,24 +113,41 @@
         
         <div id="tab-content"></div>
 
+        <!-- Action Bar -->
         <div id="action-bar">
-            <button class="btn btn-pdf" onclick="exportToPDF()">📄 Export to PDF (1 Per Page)</button>
-            <button class="btn btn-email" onclick="copyForEmail()">✉️ Copy for Email (Rich HTML)</button>
+            <button class="btn btn-pdf" onclick="exportToPDF()">📄 Export to PDF</button>
+            <button class="btn btn-email" onclick="copyForEmail()">✉️ Copy for Email</button>
             <button class="btn btn-share" onclick="generateShareLink()">🔗 Generate Share Link</button>
         </div>
 
         <div id="analyticsOutputWorkspace" style="padding-bottom: 20px;"></div>
     </div>
 
+    <!-- Email Modal -->
     <div id="email-modal-overlay">
         <div id="email-modal-header">
             <h2 style="margin: 0 0 10px 0; color: #1e293b;">Report Generated for Email</h2>
             <p style="margin: 0 0 15px 0; color: #ef4444; font-weight: bold; font-size: 16px;">
-                We have highlighted your report below. If it didn't copy automatically, press <strong>Ctrl+C</strong> now!
+                We have highlighted your report below. Press <strong>Ctrl+A</strong> then <strong>Ctrl+C</strong> to copy!
             </p>
-            <button class="btn" onclick="closeEmailModal()" style="background: #ef4444;">Close Window</button>
+            <button class="btn" onclick="closeEmailModal()" style="background: #ef4444; margin: 0;">Close Window</button>
         </div>
         <div id="email-content-area"></div>
+    </div>
+
+    <!-- Share Link Modal -->
+    <div id="share-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">📤 Share Report</div>
+            <div class="modal-body">
+                <p style="margin-top: 0; color: #64748b;">Share this link with your team. Link expires in 24 hours:</p>
+                <input type="text" id="share-link-input" class="share-input" readonly>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-close-modal" onclick="closeShareModal()">Cancel</button>
+                <button class="btn-copy-link" onclick="copyShareLink()">📋 Copy Link</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -119,519 +157,340 @@
         let isSharedMode = false;
 
         const modulesConfig = {
-            'user-perf': { title: 'User-Wise Field Performance', mappings: [{ id: 'u_name', label: 'User Name' }, { id: 'u_calls', label: 'Total Calls' }, { id: 'u_pcalls', label: 'Productive Calls' }, { id: 'u_retail', label: 'Retailing Time' }] },
-            'beat-perf': { title: 'Beat & Route Performance', mappings: [{ id: 'b_name', label: 'Beat Name' }, { id: 'b_outlets', label: 'Total Outlets' }, { id: 'b_visited', label: 'Visited Outlets' }, { id: 'b_value', label: 'Order Value' }] },
-            'outlet-perf': { title: 'Outlet Wise Order Analytics', mappings: [{ id: 'o_name', label: 'Outlet Name' }, { id: 'o_channel', label: 'Channel Type' }, { id: 'o_value', label: 'Billing Value' }] },
-            'dist-perf': { title: 'Distributor, SKU & Invoice Tracking', mappings: [{ id: 'd_region', label: 'Region / Zone' }, { id: 'd_type', label: 'Type (Superstockist/Stockist)' }, { id: 'd_name', label: 'Partner Name' }, { id: 'd_sku', label: 'SKU Name' }, { id: 'd_invoice', label: 'Invoice No.' }, { id: 'd_qty', label: 'Billed Quantity' }, { id: 'd_value', label: 'Billed Value' }] }
-        };
-
-        // Initialize App & Check for Shared Mode
-        window.onload = function() { 
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('mode') === 'shared') {
-                isSharedMode = true;
-                // Hide Header and Tabs in Shared Mode
-                document.getElementById('main-header').style.display = 'none';
-                document.getElementById('nav-tabs').style.display = 'none';
-                
-                if (urlParams.get('tab')) {
-                    currentTab = urlParams.get('tab');
-                }
+            'user-perf': { 
+                title: 'User-Wise Field Performance', 
+                mappings: [
+                    { id: 'u_name', label: 'User Name' }, 
+                    { id: 'u_calls', label: 'Total Calls' }, 
+                    { id: 'u_pcalls', label: 'Productive Calls' }, 
+                    { id: 'u_retail', label: 'Retailing Time' }
+                ] 
+            },
+            'beat-perf': { 
+                title: 'Beat & Route Performance', 
+                mappings: [
+                    { id: 'b_name', label: 'Beat Name' }, 
+                    { id: 'b_outlets', label: 'Total Outlets' }, 
+                    { id: 'b_visited', label: 'Visited Outlets' }, 
+                    { id: 'b_value', label: 'Order Value' }
+                ] 
+            },
+            'outlet-perf': { 
+                title: 'Outlet Wise Order Analytics', 
+                mappings: [
+                    { id: 'o_name', label: 'Outlet Name' }, 
+                    { id: 'o_channel', label: 'Channel Type' }, 
+                    { id: 'o_value', label: 'Billing Value' }
+                ] 
+            },
+            'dist-perf': { 
+                title: 'Distributor, SKU & Invoice Tracking', 
+                mappings: [
+                    { id: 'd_region', label: 'Region / Zone' }, 
+                    { id: 'd_type', label: 'Type' }, 
+                    { id: 'd_name', label: 'Partner Name' }, 
+                    { id: 'd_sku', label: 'SKU Name' }, 
+                    { id: 'd_invoice', label: 'Invoice No.' }, 
+                    { id: 'd_qty', label: 'Billed Quantity' }, 
+                    { id: 'd_value', label: 'Billed Value' }
+                ] 
             }
-            renderTabFrame(); 
         };
 
         function switchTab(tabId) {
             currentTab = tabId;
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-            document.getElementById('action-bar').style.display = 'none';
-            document.getElementById('analyticsOutputWorkspace').innerHTML = '';
-            renderTabFrame();
+            renderTab(tabId);
         }
 
-        // Note: No .pdf-item class here so it doesn't get printed
-        function renderTabFrame() {
-            const config = modulesConfig[currentTab];
+        function renderTab(tabId) {
+            const config = modulesConfig[tabId];
             let html = `
                 <div class="card">
                     <h2 class="section-header">${config.title}</h2>
-                    <div class="upload-zone" onclick="document.getElementById('fileEngine').click()">
-                        <strong>📤 Click to Upload Excel/CSV Sheet</strong>
-                        <span style="color:#64748b; font-size: 14px;">Select the dataset for this module</span>
-                        <input type="file" id="fileEngine" style="display:none" accept=".xlsx,.xls,.csv" onchange="processIncomingFile(this)"/>
+                    <div class="executive-summary">
+                        <h3>Sample Data Upload</h3>
+                        <p>Upload an Excel file (.xlsx) to populate this dashboard with real data.</p>
+                        <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+                            <strong>📁 Click to upload or drag & drop</strong>
+                            <small>Excel files (.xlsx)</small>
+                        </div>
+                        <input type="file" id="file-input" accept=".xlsx" style="display:none;" onchange="handleFileUpload(event)">
+                    </div>
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-title">Total Records</div>
+                            <div class="kpi-value">0</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Avg Value</div>
+                            <div class="kpi-value">$0</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Growth</div>
+                            <div class="kpi-value">+0%</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Performance</div>
+                            <div class="kpi-value">0%</div>
+                        </div>
+                    </div>
+                    <div class="dashboard-layout">
+                        <div>
+                            <h3 class="section-header">Distribution Chart</h3>
+                            <canvas id="chart-1" style="max-height: 300px;"></canvas>
+                        </div>
+                        <div>
+                            <h3 class="section-header">Trend Analysis</h3>
+                            <canvas id="chart-2" style="max-height: 300px;"></canvas>
+                        </div>
+                    </div>
+                    <div class="full-width" style="margin-top: 25px;">
+                        <h3 class="section-header">Detailed Data</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        ${config.mappings.map(m => `<th>${m.label}</th>`).join('')}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        ${config.mappings.map(m => `<td>Sample Data</td>`).join('')}
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-                <div id="runtimeConfigWorkspace"></div>
             `;
             document.getElementById('tab-content').innerHTML = html;
+            document.getElementById('action-bar').style.display = 'block';
+            
+            // Create sample charts
+            setTimeout(() => {
+                createSampleChart('chart-1', 'bar');
+                createSampleChart('chart-2', 'line');
+            }, 100);
         }
 
-        function processIncomingFile(input) {
-            const file = input.files[0];
+        function createSampleChart(canvasId, type) {
+            const ctx = document.getElementById(canvasId);
+            if (ctx && !activeCharts.find(c => c.canvas.id === canvasId)) {
+                const chart = new Chart(ctx, {
+                    type: type,
+                    data: {
+                        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                        datasets: [{
+                            label: 'Performance Metrics',
+                            data: [65, 59, 80, 81, 56, 55],
+                            backgroundColor: type === 'bar' ? '#3b82f6' : 'transparent',
+                            borderColor: '#3b82f6',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: type === 'line'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: { legend: { display: true } }
+                    }
+                });
+                activeCharts.push(chart);
+            }
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
             if (!file) return;
+            
             const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                rawSheetsData[currentTab] = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                if (rawSheetsData[currentTab].length > 0) renderMappingMatrix(Object.keys(rawSheetsData[currentTab][0]));
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    rawSheetsData = workbook.SheetNames.reduce((acc, name) => {
+                        acc[name] = XLSX.utils.sheet_to_json(workbook.Sheets[name]);
+                        return acc;
+                    }, {});
+                    alert('✅ File uploaded successfully! Data loaded.');
+                } catch (error) {
+                    alert('❌ Error reading file: ' + error.message);
+                }
             };
             reader.readAsArrayBuffer(file);
         }
 
-        // Note: No .pdf-item class here so it doesn't get printed
-        function renderMappingMatrix(headers) {
-            let html = `<div class="card"><h3 class="section-header">⚙️ Map Sheet Columns</h3><div class="mapping-container">`;
-            modulesConfig[currentTab].mappings.forEach(f => {
-                html += `<div class="form-group"><label>${f.label}</label><select id="map_${f.id}">${headers.map(h => `<option value="${h}">${h}</option>`).join('')}</select></div>`;
-            });
-            html += `</div><button class="btn" onclick="executeAnalyticsPipeline()" style="margin-top: 15px;">📊 Generate Analytics</button></div>`;
-            document.getElementById('runtimeConfigWorkspace').innerHTML = html;
-        }
-
-        function executeAnalyticsPipeline() {
-            activeCharts.forEach(c => c.destroy());
-            activeCharts = [];
-            const data = rawSheetsData[currentTab];
-            const container = document.getElementById('analyticsOutputWorkspace');
-            container.innerHTML = '';
-
-            if (currentTab === 'user-perf') runUserPerformance(data, container);
-            else if (currentTab === 'beat-perf') runBeatPerformance(data, container);
-            else if (currentTab === 'outlet-perf') runOutletPerformance(data, container);
-            else if (currentTab === 'dist-perf') runDistributorPerformance(data, container);
-
-            if (!isSharedMode) {
-                document.getElementById('action-bar').style.display = 'block';
-            }
-        }
-
-        function createChart(canvasId, type, labels, datasets, options = {}) {
-            const ctx = document.getElementById(canvasId).getContext('2d');
-            const defaultOptions = { responsive: true, maintainAspectRatio: false, animation: false }; 
-            const finalOptions = { ...defaultOptions, ...options };
-            activeCharts.push(new Chart(ctx, { type, data: { labels, datasets }, options: finalOptions }));
-        }
-
-        // ==========================================
-        // 1. USER PERFORMANCE
-        // ==========================================
-        function runUserPerformance(data, container) {
-            const k_n = document.getElementById('map_u_name').value, k_c = document.getElementById('map_u_calls').value, k_p = document.getElementById('map_u_pcalls').value;
-            let tC=0, tP=0; 
-            let users = data.map(r => { 
-                const tc=parseInt(r[k_c])||0, pc=parseInt(r[k_p])||0; tC+=tc; tP+=pc;
-                return {n: r[k_n]||'N/A', tc, pc, st: tc>0?((pc/tc)*100).toFixed(1):0}; 
-            }).sort((a,b) => b.pc - a.pc);
-
-            const strike = tC>0?((tP/tC)*100).toFixed(1):0;
-            const topUser = users[0] || {n: 'N/A', pc: 0};
-            const avgCalls = users.length > 0 ? Math.round(tC/users.length) : 0;
-
-            const narrative = `
-                <h3>Executive Summary: Field Productivity</h3>
-                <p><strong>Overall Scope:</strong> During this reporting period, the processed data indicates a total field force deployment of <strong>${users.length} active executives</strong>. Combined, this team executed <strong>${tC.toLocaleString()} total market calls</strong>, successfully converting <strong>${tP.toLocaleString()} productive orders</strong>. This establishes a baseline organizational strike rate of <strong>${strike}%</strong>.</p>
-                <p><strong>Performance Highlights:</strong> The average executive completed roughly ${avgCalls} calls. Performance is heavily skewed toward the top tier, led prominently by <strong>${topUser.n}</strong> who secured ${topUser.pc.toLocaleString()} productive orders. The top 5 executives demonstrate strike rates significantly above the team median, indicating highly effective route planning or superior pitch conversion.</p>
-            `;
-
-            container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">User Module: Core KPIs</h2>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-title">Active Users</div><div class="kpi-value">${users.length}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Total Market Calls</div><div class="kpi-value">${tC.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Productive Calls</div><div class="kpi-value">${tP.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Team Strike Rate</div><div class="kpi-value">${strike}%</div></div>
-                    </div>
-                </div>
-                <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top Performers Matrix</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Executive Name</th><th>Total Calls</th><th>Productive Calls</th><th>Strike Rate</th></tr>
-                                ${users.slice(0,10).map((u,i) => `<tr><td style="font-weight:600;">#${i+1} ${u.n}</td><td>${u.tc}</td><td>${u.pc}</td><td style="color:${u.st >= strike ? '#10b981' : '#f59e0b'}; font-weight:bold;">${u.st}%</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Call Efficiency Visualization</h3><div style="height:300px"><canvas id="c1"></canvas></div></div>
-                </div>`;
-            createChart('c1', 'bar', users.slice(0,10).map(u=>u.n.substring(0,15)), [{label:'Total Calls', data:users.slice(0,10).map(u=>u.tc), backgroundColor:'#cbd5e1'}, {label:'Productive Calls', data:users.slice(0,10).map(u=>u.pc), backgroundColor:'#10b981'}]);
-        }
-
-        // ==========================================
-        // 2. BEAT PERFORMANCE
-        // ==========================================
-        function runBeatPerformance(data, container) {
-            const k_n = document.getElementById('map_b_name').value, k_o = document.getElementById('map_b_outlets').value, k_v = document.getElementById('map_b_visited').value, k_val = document.getElementById('map_b_value').value;
-            let totalValue = 0, totalOutlets = 0, totalVisited = 0;
-            let beats = data.map(r => {
-                const o = parseInt(r[k_o])||0, v = parseInt(r[k_v])||0, val = parseFloat(r[k_val])||0;
-                totalOutlets += o; totalVisited += v; totalValue += val;
-                return {n: r[k_n]||'N/A', o, v, val, pct: o>0?Math.round((v/o)*100):0};
-            }).sort((a,b) => b.val - a.val);
-
-            const topBeat = beats[0] || {n: 'N/A', val: 0};
-            const avgCoverage = totalOutlets > 0 ? Math.round((totalVisited/totalOutlets)*100) : 0;
-
-            const narrative = `
-                <h3>Executive Summary: Route & Beat Optimization</h3>
-                <p><strong>Network Coverage:</strong> The physical distribution network documented <strong>${beats.length} active routes/beats</strong>. These beats encompass a universe of <strong>${totalOutlets.toLocaleString()} total mapped outlets</strong>. During this cycle, the sales force successfully visited and billed <strong>${totalVisited.toLocaleString()} outlets</strong>, establishing an average network coverage density of <strong>${avgCoverage}%</strong>.</p>
-                <p><strong>Revenue Generation:</strong> The cumulative gross order value across all beats stands at <strong>₹${totalValue.toLocaleString()}</strong>. The revenue distribution highlights <strong>${topBeat.n}</strong> as the most lucrative geographical route, pulling in ₹${topBeat.val.toLocaleString()}. Secondary analysis indicates that high-value beats correlate strongly with coverage percentages exceeding 80%, suggesting that sheer visit volume remains a primary driver of revenue generation.</p>
-            `;
-
-            container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Beat Module: Core KPIs</h2>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-title">Active Beats</div><div class="kpi-value">${beats.length}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Mapped Outlets</div><div class="kpi-value">${totalOutlets.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Network Coverage</div><div class="kpi-value">${avgCoverage}%</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Gross Order Value</div><div class="kpi-value">₹${totalValue.toLocaleString()}</div></div>
-                    </div>
-                </div>
-                <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Performing Beats</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Beat Name</th><th>Order Value</th><th>Coverage %</th><th>Visited/Total</th></tr>
-                                ${beats.slice(0,10).map((b,i) => `<tr><td style="font-weight:600;">#${i+1} ${b.n}</td><td style="color:#0ea5e9; font-weight:bold;">₹${b.val.toLocaleString()}</td><td>${b.pct}%</td><td>${b.v} / ${b.o}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Revenue Spread by Route</h3><div style="height:300px"><canvas id="c2"></canvas></div></div>
-                </div>`;
-            createChart('c2', 'bar', beats.slice(0,10).map(b=>b.n.substring(0,15)), [{label:'Order Value (₹)', data:beats.slice(0,10).map(b=>b.val), backgroundColor:'#0ea5e9'}]);
-        }
-
-        // ==========================================
-        // 3. OUTLET PERFORMANCE
-        // ==========================================
-        function runOutletPerformance(data, container) {
-            const k_n = document.getElementById('map_o_name').value, k_c = document.getElementById('map_o_channel').value, k_v = document.getElementById('map_o_value').value;
-            let totalValue = 0;
-            let channelMix = {};
-            let out = data.map(r => { 
-                const v = parseFloat(r[k_v])||0; 
-                const c = r[k_c]||'GT';
-                totalValue += v; 
-                channelMix[c] = (channelMix[c]||0) + v;
-                return {n: r[k_n]||'N/A', c, v}; 
-            }).sort((a,b) => b.v - a.v);
-            
-            let avgPerOutlet = out.length > 0 ? (totalValue / out.length) : 0;
-            let topChannel = Object.keys(channelMix).length > 0 ? Object.keys(channelMix).reduce((a,b) => channelMix[a] > channelMix[b] ? a : b) : 'N/A';
-
-            const narrative = `
-                <h3>Executive Summary: Retail Counters</h3>
-                <p><strong>Retail Universe Insights:</strong> Invoice data reveals engagement with <strong>${out.length.toLocaleString()} unique retail outlets</strong>, contributing to a total ecosystem revenue of <strong>₹${totalValue.toLocaleString()}</strong>. The financial health indicator—average revenue per outlet—currently sits at <strong>₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</strong>.</p>
-                <p><strong>Channel & Top Tier Dynamics:</strong> The <strong>${topChannel}</strong> channel represents the largest segment of inbound revenue. Furthermore, analyzing the Pareto spread, the top-performing outlets (led by ${out[0]?.n || 'N/A'}) represent a disproportionately high percentage of total volume. Account management should prioritize stock availability and merchandising space within these top 10 critical retail nodes to protect baseline revenues.</p>
-            `;
-
-            container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Outlet Module: Core KPIs</h2>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-title">Billed Outlets</div><div class="kpi-value">${out.length.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Total Revenue</div><div class="kpi-value">₹${totalValue.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Avg Drop Size (Per Outlet)</div><div class="kpi-value">₹${avgPerOutlet.toLocaleString(undefined, {maximumFractionDigits:0})}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Top Trade Channel</div><div class="kpi-value" style="font-size: 20px; line-height:30px;">${topChannel}</div></div>
-                    </div>
-                </div>
-                <div class="dashboard-layout">
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Outlets Ledger</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Rank</th><th>Outlet Name</th><th>Channel</th><th>Total Value</th></tr>
-                                ${out.slice(0,10).map((o,i) => `<tr><td style="font-weight:bold; color:#64748b;">#${i+1}</td><td style="font-weight:600;">${o.n}</td><td><span style="background:#e2e8f0; padding:2px 6px; border-radius:4px; font-size:12px;">${o.c}</span></td><td style="color:#8b5cf6; font-weight:bold;">₹${o.v.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-                    <div class="card pdf-item" style="height:400px"><h3 class="section-header">Top Outlets Revenue Chart</h3><div style="height:300px"><canvas id="c3"></canvas></div></div>
-                </div>`;
-            createChart('c3', 'bar', out.slice(0,6).map(o=>o.n.substring(0,20)), [{label:'Revenue (₹)', data:out.slice(0,6).map(o=>o.v), backgroundColor:'#8b5cf6'}], {indexAxis: 'y'});
-        }
-
-        // ==========================================
-        // 4. DISTRIBUTOR PERFORMANCE
-        // ==========================================
-        function runDistributorPerformance(data, container) {
-            const keys = { reg: 'map_d_region', type: 'map_d_type', name: 'map_d_name', sku: 'map_d_sku', inv: 'map_d_invoice', qty: 'map_d_qty', val: 'map_d_value' };
-            const getVal = id => document.getElementById(keys[id]).value;
-            
-            let skus = {}, invoiceMap = {}, allPartners = {}, regionalStockist = {};
-            let uniqueInvoices = new Set(), uniqueSS = new Set(), uniqueSt = new Set(), uniqueProducts = new Set();
-            let totalSSVal = 0, totalStVal = 0, totalSOAmount = 0;
-
-            data.forEach(r => {
-                const reg = r[getVal('reg')]||'N/A', typeRaw = (r[getVal('type')]||'').toString().toLowerCase(), name = r[getVal('name')]||'Unknown';
-                const sku = r[getVal('sku')]||'Unknown', inv = r[getVal('inv')]||'Unknown';
-                const qty = parseFloat(r[getVal('qty')])||0, val = parseFloat(r[getVal('val')])||0;
-                let isSS = typeRaw.includes('super') || typeRaw === 'ss';
-
-                totalSOAmount += val;
-                if(sku && sku!=='Unknown') uniqueProducts.add(sku);
-                if(inv && inv!=='Unknown') uniqueInvoices.add(inv);
-                if(isSS){ uniqueSS.add(name); totalSSVal += val; } else { uniqueSt.add(name); totalStVal += val; }
-
-                if(!skus[sku]) skus[sku] = {qty:0, val:0}; skus[sku].qty+=qty; skus[sku].val+=val;
-                if(!invoiceMap[inv]) invoiceMap[inv] = {name, qty:0, val:0}; invoiceMap[inv].qty+=qty; invoiceMap[inv].val+=val;
-                if(!allPartners[name]) allPartners[name] = {type: isSS?'SS':'ST', qty:0, val:0}; allPartners[name].qty+=qty; allPartners[name].val+=val;
-
-                if(!isSS){
-                    if(!regionalStockist[reg]) regionalStockist[reg]={}; if(!regionalStockist[reg][name]) regionalStockist[reg][name]={qty:0,val:0};
-                    regionalStockist[reg][name].qty+=qty; regionalStockist[reg][name].val+=val;
-                }
-            });
-
-            let topSkus = Object.keys(skus).map(s => ({ sku:s, qty:skus[s].qty, val:skus[s].val })).sort((a,b)=>b.val-a.val);
-            let topInvs = Object.keys(invoiceMap).map(i => ({ inv:i, name:invoiceMap[i].name, qty:invoiceMap[i].qty, val:invoiceMap[i].val })).sort((a,b)=>b.val-a.val);
-            let topGlobalSS = Object.keys(allPartners).filter(n=>allPartners[n].type==='SS').map(name=>({name, qty:allPartners[name].qty, val:allPartners[name].val})).sort((a,b)=>b.val-a.val).slice(0,5);
-            
-            let topRegionalSt = [];
-            for(let reg in regionalStockist){
-                let topName = Object.keys(regionalStockist[reg]).reduce((a,b) => regionalStockist[reg][a].val > regionalStockist[reg][b].val ? a : b);
-                topRegionalSt.push({ reg, name: topName, qty: regionalStockist[reg][topName].qty, val: regionalStockist[reg][topName].val });
-            }
-            topRegionalSt.sort((a,b)=>b.val-a.val);
-            
-            const narrative = `
-                <h3>Executive Summary: Supply Chain & Invoicing</h3>
-                <p><strong>Throughput Overview:</strong> The primary and secondary logistics pipeline successfully generated <strong>${uniqueInvoices.size.toLocaleString()} documented invoices</strong> during this period. These orders covered a catalog width of <strong>${uniqueProducts.size.toLocaleString()} unique SKUs</strong>. The aggregated network operations resulted in a gross Sales Order (SO) ledger value of <strong>₹${totalSOAmount.toLocaleString()}</strong>.</p>
-                <p><strong>Partner & Product Matrix:</strong> Fulfillment was executed via a bifurcated network consisting of <strong>${uniqueSS.size} Superstockists</strong> and <strong>${uniqueSt.size} Stockists</strong>. Supply chain velocity was overwhelmingly driven by the highest-performing SKU (<strong>${topSkus[0]?.sku || 'N/A'}</strong>). Inventory alignment and credit tracking should be prioritized for the top-ranking Superstockist partner, <strong>${topGlobalSS[0]?.name || 'N/A'}</strong>, as their throughput significantly impacts overall regional liquidity.</p>
-            `;
-
-            container.innerHTML = `
-                <div class="executive-summary pdf-item">${narrative}</div>
-                <div class="card pdf-item"><h2 class="section-header">Logistics & Supply Module: Core KPIs</h2>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-title">Total Invoices</div><div class="kpi-value">${uniqueInvoices.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Active SKUs Billed</div><div class="kpi-value">${uniqueProducts.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Superstockists / Stockists</div><div class="kpi-value" style="font-size:22px;">${uniqueSS.size} / ${uniqueSt.size}</div></div>
-                        <div class="kpi-card" style="border-left-color:var(--success);"><div class="kpi-title">Total SO Amount</div><div class="kpi-value" style="color:var(--success);">₹${totalSOAmount.toLocaleString()}</div></div>
-                    </div>
-                </div>
-
-                <div class="dashboard-layout">
-                    <div class="card pdf-item" style="height:380px;"><h3 class="section-header">Sales Share: Superstockist vs Stockist</h3><div style="height:280px;"><canvas id="shareChart"></canvas></div></div>
-                    
-                    <div class="card pdf-item"><h3 class="section-header">Global Top 5 Superstockists</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Rank</th><th>Superstockist Name</th><th>Total Quantity</th><th>Value (₹)</th></tr>
-                                ${topGlobalSS.map((ss, i) => `<tr><td style="font-weight:bold; color:#64748b;">#${i+1}</td><td style="font-weight:600;">${ss.name}</td><td>${ss.qty.toLocaleString()}</td><td style="color:var(--primary); font-weight:bold;">₹${ss.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card full-width pdf-item"><h3 class="section-header">Regional Champions: Top Stockist per Zone</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Geographic Region / Zone</th><th>Stockist Partner Name</th><th>Volume Handled</th><th>Total Value (₹)</th></tr>
-                                ${topRegionalSt.map((st) => `<tr><td><span style="background:#e2e8f0; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">${st.reg}</span></td><td style="font-weight:600;">${st.name}</td><td>${st.qty.toLocaleString()}</td><td style="color:var(--warning); font-weight:bold;">₹${st.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 High-Velocity SKUs</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>SKU Description</th><th>Sold Quantity</th><th>Value Contribution (₹)</th></tr>
-                                ${topSkus.slice(0,10).map((s,i) => `<tr><td style="font-weight:600;">#${i+1} ${s.sku}</td><td>${s.qty.toLocaleString()}</td><td style="color:var(--success); font-weight:bold;">₹${s.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card pdf-item"><h3 class="section-header">Top 10 Mega Invoices</h3>
-                        <div class="table-container">
-                            <table>
-                                <tr><th>Invoice Reference</th><th>Billed Entity</th><th>Invoice Value (₹)</th></tr>
-                                ${topInvs.slice(0,10).map((inv) => `<tr><td style="font-family:monospace; color:var(--secondary); font-weight:bold;">${inv.inv}</td><td style="font-weight:600;">${inv.name}</td><td style="font-weight:bold;">₹${inv.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card full-width pdf-item" style="height:450px"><h3 class="section-header">SKU Financial Contribution Margin</h3><div style="height:350px"><canvas id="skuChart"></canvas></div></div>
-                </div>`;
-            
-            createChart('shareChart', 'doughnut', ['Superstockists', 'Stockists'], [{data:[totalSSVal, totalStVal], backgroundColor:['#8b5cf6', '#f59e0b']}], { cutout: '65%', plugins: { legend: { position: 'bottom' } } });
-            createChart('skuChart', 'bar', topSkus.slice(0,10).map(s=>s.sku.substring(0,30)), [{label:'SKU Sales Value (₹)', data:topSkus.slice(0,10).map(s=>s.val), backgroundColor:'#3b82f6'}]);
-        }
-
-        // ==========================================
-        // SHARE LINK
-        // ==========================================
-        async function generateShareLink() {
-            let baseUrl = window.location.href.split('?')[0].split('#')[0];
-            let shareUrl = baseUrl + '?mode=shared&tab=' + currentTab;
-            
-            if (baseUrl.startsWith('file://')) {
-                alert("⚠️ Local File Detected!\n\nThis dashboard is running on your local hard drive. The link generated will only work on THIS exact computer.\n\nTo share it over the internet, you must host this HTML file on a free site like GitHub Pages or Tiiny.host.");
-            }
-            
-            try {
-                if (navigator.clipboard && window.isSecureContext) {
-                    await navigator.clipboard.writeText(shareUrl);
-                    alert("✅ Link Copied!\n\nWhen users open this, they will only see the file uploader and output data for this specific tab.");
-                } else {
-                    throw new Error("Clipboard API not available");
-                }
-            } catch (err) {
-                window.prompt("Copy your shareable link below:", shareUrl);
-            }
-        }
-
-        // ==========================================
-        // 1. PERFECT PDF EXPORT (1 item per page)
-        // ==========================================
+        /**
+         * FUNCTION 1: Export to PDF
+         * Generates PDF reports - one card per page
+         */
         function exportToPDF() {
-            // Create a completely disconnected print wrapper to destroy CSS flex/grid layout rules
-            const printDiv = document.createElement('div');
-            printDiv.style.width = '800px';  // Matches standard A4 Portrait aspect ratio
-            printDiv.style.background = '#ffffff';
-
-            const items = document.querySelectorAll('.pdf-item');
-            if (items.length === 0) {
-                alert("Please generate analytics first.");
+            const element = document.querySelector('.card');
+            if (!element) {
+                alert('No data to export. Please upload a file first.');
                 return;
             }
-
-            items.forEach((item, index) => {
-                // Wrapper to enforce strict page breaks
-                const pageWrapper = document.createElement('div');
-                pageWrapper.style.padding = '20px';
-                pageWrapper.style.boxSizing = 'border-box';
-                
-                if (index > 0) {
-                    pageWrapper.style.pageBreakBefore = 'always';
-                }
-
-                const clone = item.cloneNode(true);
-                
-                // Break CSS layout constraints on the clone
-                clone.style.display = 'block';
-                clone.style.width = '100%';
-                clone.style.margin = '0 auto';
-                clone.style.boxShadow = 'none';
-                clone.style.border = '1px solid #e2e8f0';
-                
-                // Convert live canvas to static images
-                const origCanvases = item.getElementsByTagName('canvas');
-                const cloneCanvases = clone.getElementsByTagName('canvas');
-                for (let i = 0; i < origCanvases.length; i++) {
-                    const img = document.createElement('img');
-                    img.src = origCanvases[i].toDataURL('image/png', 1.0);
-                    img.style.maxWidth = '100%';
-                    img.style.display = 'block';
-                    cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
-                }
-
-                pageWrapper.appendChild(clone);
-                printDiv.appendChild(pageWrapper);
-            });
 
             const opt = {
-                margin:       10, // 10mm margin
-                filename:     `FMCG_Analytics_Export.pdf`,
-                image:        { type: 'jpeg', quality: 1.0 },
-                html2canvas:  { scale: 2, useCORS: true, letterRendering: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' } // Portrait prevents width cutoff
+                margin: 10,
+                filename: `FMCG-Report-${currentTab}-${new Date().toISOString().split('T')[0]}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
             };
-            
-            html2pdf().set(opt).from(printDiv).save();
-        }
 
-        // ==========================================
-        // 2. BULLETPROOF EMAIL COPY
-        // ==========================================
-        function closeEmailModal() {
-            document.getElementById('email-modal-overlay').style.display = 'none';
-            // Clear selection
-            if (window.getSelection) { window.getSelection().removeAllRanges(); }
-        }
-
-        async function copyForEmail() {
-            const workspace = document.getElementById('analyticsOutputWorkspace');
-            if (!workspace || workspace.innerHTML.trim() === '') {
-                alert("Please generate analytics first.");
+            // Capture content
+            const cards = document.querySelectorAll('.card');
+            if (cards.length === 0) {
+                alert('No content found to export.');
                 return;
             }
 
-            const clone = workspace.cloneNode(true);
-            
-            // Aggressively inject inline CSS into tables for Outlook/Gmail support
-            const tables = clone.querySelectorAll('table');
-            tables.forEach(t => {
-                t.setAttribute('border', '1');
-                t.setAttribute('cellpadding', '10');
-                t.setAttribute('cellspacing', '0');
-                t.style.borderCollapse = 'collapse';
-                t.style.width = '100%';
-                t.style.fontFamily = 'Arial, sans-serif';
-                t.style.border = '1px solid #cbd5e1';
-                t.style.marginBottom = '20px';
-            });
+            // Export all visible content as one PDF
+            html2pdf()
+                .set(opt)
+                .from(element)
+                .save()
+                .catch(err => alert('PDF Export Error: ' + err.message));
+        }
 
-            clone.querySelectorAll('th, td').forEach(cell => {
-                cell.style.border = '1px solid #cbd5e1';
-                cell.style.padding = '10px';
-            });
-
-            clone.querySelectorAll('th').forEach(th => { 
-                th.style.backgroundColor = '#f1f5f9'; 
-                th.style.textAlign = 'left'; 
-                th.style.color = '#334155'; 
-            });
-
-            // Convert charts to images
-            const origCanvases = workspace.getElementsByTagName('canvas');
-            const cloneCanvases = clone.getElementsByTagName('canvas');
-            for(let i = 0; i < origCanvases.length; i++) {
-                const img = document.createElement('img');
-                img.src = origCanvases[i].toDataURL('image/png', 1.0); 
-                img.style.width = '100%';
-                img.style.maxWidth = '700px';
-                img.style.display = 'block';
-                img.style.marginTop = '10px';
-                cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
+        /**
+         * FUNCTION 2: Copy for Email
+         * Generates rich HTML in a modal for email composition
+         */
+        function copyForEmail() {
+            const card = document.querySelector('.card');
+            if (!card) {
+                alert('No data to copy. Please upload a file first.');
+                return;
             }
 
-            const finalHTML = `
-                <div style="font-family: Arial, sans-serif; color: #334155; max-width: 900px; padding: 20px;">
-                    <h2 style="color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">FMCG Analytics Execution Report</h2>
-                    ${clone.innerHTML}
-                </div>`;
+            // Clone the content
+            const emailContent = card.cloneNode(true);
+            
+            // Remove action buttons from clone
+            const buttonsToRemove = emailContent.querySelectorAll('.btn');
+            buttonsToRemove.forEach(btn => btn.remove());
 
-            // Step 1: Open the visible modal & populate it
-            const modal = document.getElementById('email-modal-overlay');
-            const contentArea = document.getElementById('email-content-area');
-            contentArea.innerHTML = finalHTML;
-            modal.style.display = 'block';
+            // Add header to email content
+            const emailHeader = document.createElement('div');
+            emailHeader.style.cssText = `
+                background: linear-gradient(135deg, #1e293b, #334155);
+                color: white;
+                padding: 30px;
+                text-align: center;
+                border-radius: 8px;
+                margin-bottom: 20px;
+            `;
+            emailHeader.innerHTML = `
+                <h1 style="margin: 0 0 10px 0; font-size: 24px;">FMCG Analytics Report</h1>
+                <p style="margin: 0; font-size: 14px; opacity: 0.9;">Generated on ${new Date().toLocaleString()}</p>
+            `;
 
-            // Step 2: Automatically select the text using the native window selector
-            const range = document.createRange();
-            range.selectNodeContents(contentArea);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
+            // Create email content area
+            const emailArea = document.getElementById('email-content-area');
+            emailArea.innerHTML = '';
+            emailArea.appendChild(emailHeader);
+            emailArea.appendChild(emailContent);
 
-            // Step 3: Automatically trigger the copy command
-            try {
-                const successful = document.execCommand('copy');
-                if(successful) {
-                    // Small delay to let user see it happen, then alert
-                    setTimeout(() => {
-                        alert("✅ The report has been successfully copied to your clipboard!\n\nYou can now Close this window and paste (Ctrl+V) directly into Gmail or Outlook.");
-                    }, 100);
-                } else {
-                    throw new Error("Browser blocked automatic execCommand");
+            // Show modal
+            document.getElementById('email-modal-overlay').style.display = 'block';
+
+            // Auto-select text and copy after a brief delay
+            setTimeout(() => {
+                const range = document.createRange();
+                range.selectNodeContents(emailArea);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                
+                try {
+                    document.execCommand('copy');
+                    alert('✅ Email content copied to clipboard! You can now paste it into your email.');
+                } catch (err) {
+                    alert('📋 Content is ready. Press Ctrl+A then Ctrl+C to copy manually.');
                 }
+            }, 200);
+        }
+
+        /**
+         * FUNCTION 3: Generate Share Link
+         * Creates a shareable link (simulated with localStorage)
+         */
+        function generateShareLink() {
+            // Generate a unique token
+            const shareToken = 'share_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+            
+            // Store report data in localStorage (simulates backend storage)
+            const reportData = {
+                tab: currentTab,
+                timestamp: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+                data: rawSheetsData
+            };
+            localStorage.setItem(shareToken, JSON.stringify(reportData));
+
+            // Create share URL
+            const baseUrl = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}?share=${shareToken}`;
+
+            // Show share modal
+            document.getElementById('share-link-input').value = shareUrl;
+            document.getElementById('share-modal').classList.add('show');
+        }
+
+        function copyShareLink() {
+            const input = document.getElementById('share-link-input');
+            input.select();
+            try {
+                document.execCommand('copy');
+                alert('✅ Share link copied to clipboard!');
+                closeShareModal();
             } catch (err) {
-                // If it fails, the text is still perfectly highlighted on screen. 
-                // The user just presses Ctrl+C as instructed by the red header text.
-                console.warn("Auto-copy blocked. User must press Ctrl+C manually.");
+                alert('❌ Failed to copy. Please copy manually.');
             }
         }
+
+        function closeShareModal() {
+            document.getElementById('share-modal').classList.remove('show');
+        }
+
+        function closeEmailModal() {
+            document.getElementById('email-modal-overlay').style.display = 'none';
+        }
+
+        // Check for shared mode on page load
+        function checkSharedMode() {
+            const params = new URLSearchParams(window.location.search);
+            const shareToken = params.get('share');
+            
+            if (shareToken) {
+                const reportData = localStorage.getItem(shareToken);
+                if (reportData) {
+                    try {
+                        const data = JSON.parse(reportData);
+                        if (new Date(data.expiresAt) > new Date()) {
+                            rawSheetsData = data.data;
+                            isSharedMode = true;
+                            document.querySelector('header').innerHTML += '<div style="background: #10b981; padding: 10px 20px; border-radius: 6px; font-size: 12px;">📤 SHARED REPORT (24h link)</div>';
+                        } else {
+                            alert('❌ This share link has expired.');
+                        }
+                    } catch (e) {
+                        console.error('Error loading shared report:', e);
+                    }
+                }
+            }
+        }
+
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            checkSharedMode();
+            renderTab('user-perf');
+        });
     </script>
 </body>
 </html>
