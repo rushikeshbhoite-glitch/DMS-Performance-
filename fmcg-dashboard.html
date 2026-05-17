@@ -68,10 +68,10 @@
 
     <div class="container">
         <div class="tabs" id="nav-tabs">
-            <button class="tab-btn active" onclick="switchTab('user-perf')">👤 User Performance</button>
-            <button class="tab-btn" onclick="switchTab('beat-perf')">📍 Beat Performance</button>
-            <button class="tab-btn" onclick="switchTab('outlet-perf')">🏪 Outlet Performance</button>
-            <button class="tab-btn" onclick="switchTab('dist-perf')">🚛 Distributor & Invoices</button>
+            <button class="tab-btn active" onclick="switchTab('user-perf', this)">👤 User Performance</button>
+            <button class="tab-btn" onclick="switchTab('beat-perf', this)">📍 Beat Performance</button>
+            <button class="tab-btn" onclick="switchTab('outlet-perf', this)">🏪 Outlet Performance</button>
+            <button class="tab-btn" onclick="switchTab('dist-perf', this)">🚛 Distributor & Invoices</button>
         </div>
         
         <div id="controls-workspace"></div>
@@ -110,10 +110,18 @@
             renderUploadUI(); 
         };
 
-        function switchTab(tabId) {
+        // FIXED TAB SWITCHER: Now directly receives the button element
+        function switchTab(tabId, btnElement) {
             currentTab = tabId;
+            
+            // Remove active class from all buttons
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
+            
+            // Add active class to clicked button
+            if(btnElement) {
+                btnElement.classList.add('active');
+            }
+            
             document.getElementById('action-bar').style.display = 'none';
             document.getElementById('analyticsOutputWorkspace').innerHTML = '';
             renderUploadUI();
@@ -226,252 +234,21 @@
         }
 
         // ==========================================
-        // MODULE: DISTRIBUTOR PERFORMANCE
+        // MODULE: BEAT PERFORMANCE
         // ==========================================
-        function buildDistributorDashboard(data, container) {
-            const keys = { reg: 'map_d_region', type: 'map_d_type', name: 'map_d_name', sku: 'map_d_sku', inv: 'map_d_invoice', qty: 'map_d_qty', val: 'map_d_value' };
-            const getVal = id => document.getElementById(keys[id]).value;
-            
-            let skus = {}, invoiceMap = {}, allPartners = {}, regionalStockist = {};
-            let uniqueInvoices = new Set(), uniqueSS = new Set(), uniqueSt = new Set(), uniqueProducts = new Set();
-            let totalSSVal = 0, totalStVal = 0, totalSOAmount = 0;
+        function buildBeatDashboard(data, container) {
+            const k_n = document.getElementById('map_b_name').value, k_o = document.getElementById('map_b_outlets').value, k_v = document.getElementById('map_b_visited').value, k_val = document.getElementById('map_b_value').value;
+            let totalValue = 0, totalOutlets = 0, totalVisited = 0;
+            let beats = data.map(r => {
+                const o = parseInt(r[k_o])||0, v = parseInt(r[k_v])||0, val = parseFloat(r[k_val])||0;
+                totalOutlets += o; totalVisited += v; totalValue += val;
+                return {n: r[k_n]||'N/A', o, v, val, pct: o>0?Math.round((v/o)*100):0};
+            }).sort((a,b) => b.val - a.val);
 
-            data.forEach(r => {
-                const reg = r[getVal('reg')]||'N/A', typeRaw = (r[getVal('type')]||'').toString().toLowerCase(), name = r[getVal('name')]||'Unknown';
-                const sku = r[getVal('sku')]||'Unknown', inv = r[getVal('inv')]||'Unknown';
-                const qty = parseFloat(r[getVal('qty')])||0, val = parseFloat(r[getVal('val')])||0;
-                let isSS = typeRaw.includes('super') || typeRaw === 'ss';
+            const topBeat = beats[0] || {n: 'N/A', val: 0};
+            const avgCoverage = totalOutlets > 0 ? Math.round((totalVisited/totalOutlets)*100) : 0;
 
-                totalSOAmount += val;
-                if(sku && sku!=='Unknown') uniqueProducts.add(sku);
-                if(inv && inv!=='Unknown') uniqueInvoices.add(inv);
-                if(isSS){ uniqueSS.add(name); totalSSVal += val; } else { uniqueSt.add(name); totalStVal += val; }
-
-                if(!skus[sku]) skus[sku] = {qty:0, val:0}; skus[sku].qty+=qty; skus[sku].val+=val;
-                if(!invoiceMap[inv]) invoiceMap[inv] = {name, qty:0, val:0}; invoiceMap[inv].qty+=qty; invoiceMap[inv].val+=val;
-                if(!allPartners[name]) allPartners[name] = {type: isSS?'SS':'ST', qty:0, val:0}; allPartners[name].qty+=qty; allPartners[name].val+=val;
-
-                if(!isSS){
-                    if(!regionalStockist[reg]) regionalStockist[reg]={}; if(!regionalStockist[reg][name]) regionalStockist[reg][name]={qty:0,val:0};
-                    regionalStockist[reg][name].qty+=qty; regionalStockist[reg][name].val+=val;
-                }
-            });
-
-            let topSkus = Object.keys(skus).map(s => ({ sku:s, qty:skus[s].qty, val:skus[s].val })).sort((a,b)=>b.val-a.val);
-            let topInvs = Object.keys(invoiceMap).map(i => ({ inv:i, name:invoiceMap[i].name, qty:invoiceMap[i].qty, val:invoiceMap[i].val })).sort((a,b)=>b.val-a.val);
-            let topGlobalSS = Object.keys(allPartners).filter(n=>allPartners[n].type==='SS').map(name=>({name, qty:allPartners[name].qty, val:allPartners[name].val})).sort((a,b)=>b.val-a.val).slice(0,5);
-            
-            let topRegionalSt = [];
-            for(let reg in regionalStockist){
-                let topName = Object.keys(regionalStockist[reg]).reduce((a,b) => regionalStockist[reg][a].val > regionalStockist[reg][b].val ? a : b);
-                topRegionalSt.push({ reg, name: topName, qty: regionalStockist[reg][topName].qty, val: regionalStockist[reg][topName].val });
-            }
-            topRegionalSt.sort((a,b)=>b.val-a.val);
-            
             const narrative = `
-                <h3>Executive Summary: Supply Chain & Invoicing Logistics</h3>
-                <p><strong>Throughput & Volume Overview:</strong> The primary and secondary logistics pipeline successfully generated <strong>${uniqueInvoices.size.toLocaleString()} documented invoices</strong> during this period. These orders effectively covered a catalog width of <strong>${uniqueProducts.size.toLocaleString()} unique SKUs</strong>. The aggregated network operations resulted in a gross Sales Order (SO) ledger value of <strong>₹${totalSOAmount.toLocaleString()}</strong>.</p>
-                <p><strong>Partner & Product Matrix:</strong> Fulfillment was executed via a bifurcated network consisting of <strong>${uniqueSS.size} active Superstockists</strong> and <strong>${uniqueSt.size} active Stockists</strong>. Supply chain velocity was overwhelmingly driven by the highest-performing SKU (<strong>${topSkus[0]?.sku || 'N/A'}</strong>), which single-handedly generated ₹${(topSkus[0]?.val||0).toLocaleString()}. Inventory alignment and credit tracking should be heavily prioritized for the top-ranking Superstockist partner, <strong>${topGlobalSS[0]?.name || 'N/A'}</strong>, as their throughput significantly impacts overall regional liquidity.</p>
-            `;
-
-            container.innerHTML = `
-                <div class="executive-summary print-block">${narrative}</div>
-                <div class="card print-block"><h2 class="section-header">Logistics & Supply KPIs</h2>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-title">Total Invoices</div><div class="kpi-value">${uniqueInvoices.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Active SKUs Billed</div><div class="kpi-value">${uniqueProducts.size.toLocaleString()}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">SS / Stockists</div><div class="kpi-value" style="font-size:22px;">${uniqueSS.size} / ${uniqueSt.size}</div></div>
-                        <div class="kpi-card"><div class="kpi-title">Total SO Amount</div><div class="kpi-value" style="color:var(--success);">₹${totalSOAmount.toLocaleString()}</div></div>
-                    </div>
-                </div>
-
-                <div class="dashboard-layout">
-                    <div class="card print-block" style="height:380px;"><h3 class="section-header">Sales Share: Superstockist vs Stockist</h3><div style="height:280px;"><canvas id="shareChart"></canvas></div></div>
-                    
-                    <div class="card print-block"><h3 class="section-header">Global Top 5 Superstockists</h3>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <tr><th>Rank</th><th>Superstockist Name</th><th>Value (₹)</th></tr>
-                                ${topGlobalSS.map((ss, i) => `<tr><td><strong>#${i+1}</strong></td><td>${ss.name}</td><td><strong>₹${ss.val.toLocaleString()}</strong></td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card full-width print-block"><h3 class="section-header">Regional Champions: Top Stockist per Zone</h3>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <tr><th>Geographic Region / Zone</th><th>Stockist Partner Name</th><th>Volume Handled</th><th>Total Value (₹)</th></tr>
-                                ${topRegionalSt.map((st) => `<tr><td><strong>${st.reg}</strong></td><td>${st.name}</td><td>${st.qty.toLocaleString()}</td><td style="color:var(--warning); font-weight:bold;">₹${st.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card print-block"><h3 class="section-header">Top 10 High-Velocity SKUs</h3>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <tr><th>SKU Description</th><th>Sold Quantity</th><th>Value Contribution (₹)</th></tr>
-                                ${topSkus.slice(0,10).map((s,i) => `<tr><td><strong>#${i+1} ${s.sku}</strong></td><td>${s.qty.toLocaleString()}</td><td style="color:var(--success); font-weight:bold;">₹${s.val.toLocaleString()}</td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card print-block"><h3 class="section-header">Top 10 Mega Invoices</h3>
-                        <div class="table-container">
-                            <table class="data-table">
-                                <tr><th>Invoice Reference</th><th>Billed Entity</th><th>Invoice Value (₹)</th></tr>
-                                ${topInvs.slice(0,10).map((inv) => `<tr><td style="font-family:monospace; color:var(--secondary); font-weight:bold;">${inv.inv}</td><td>${inv.name}</td><td><strong>₹${inv.val.toLocaleString()}</strong></td></tr>`).join('')}
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card full-width print-block" style="height:450px"><h3 class="section-header">SKU Financial Contribution Margin</h3><div style="height:350px"><canvas id="skuChart"></canvas></div></div>
-                </div>`;
-            
-            renderChart('shareChart', 'doughnut', ['Superstockists', 'Stockists'], [{data:[totalSSVal, totalStVal], backgroundColor:['#8b5cf6', '#f59e0b']}], { cutout: '65%' });
-            renderChart('skuChart', 'bar', topSkus.slice(0,10).map(s=>s.sku.substring(0,30)), [{label:'SKU Sales Value (₹)', data:topSkus.slice(0,10).map(s=>s.val), backgroundColor:'#3b82f6'}]);
-        }
-
-        // ==========================================
-        // EXPORT ENGINE 1: NATIVE PDF (Foolproof)
-        // ==========================================
-        // This generates a clean HTML string of ONLY the output, opens a print window, and uses native browser PDF rendering. 
-        // No chopped charts. Perfect page breaks.
-        function exportToPDF() {
-            const workspace = document.getElementById('analyticsOutputWorkspace');
-            if (!workspace || workspace.innerHTML.trim() === '') {
-                alert("Please generate analytics first."); return;
-            }
-
-            const clone = workspace.cloneNode(true);
-            
-            // Convert Canvases to Images
-            const origCanvases = workspace.getElementsByTagName('canvas');
-            const cloneCanvases = clone.getElementsByTagName('canvas');
-            for(let i = 0; i < origCanvases.length; i++) {
-                const img = document.createElement('img');
-                img.src = origCanvases[i].toDataURL('image/png', 1.0); 
-                img.style.maxWidth = '100%'; img.style.display = 'block'; img.style.margin = '0 auto';
-                cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
-            }
-
-            // Create Print Document
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(`
-                <html>
-                <head>
-                    <title>FMCG Report Export</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; color: #333; padding: 20px; }
-                        h2, h3 { color: #1e293b; margin-bottom: 10px; }
-                        .print-block { 
-                            page-break-inside: avoid; /* Prevents tables/charts cutting in half */
-                            page-break-after: always; /* Forces 1 item per page */
-                            margin-bottom: 40px; 
-                            border: 1px solid #ccc;
-                            padding: 20px;
-                            border-radius: 8px;
-                        }
-                        .executive-summary { background: #f8fafc; border-left: 5px solid #3b82f6; page-break-after: always;}
-                        .kpi-grid { display: block; width: 100%; margin-bottom: 20px;}
-                        .kpi-card { display: inline-block; width: 45%; margin-bottom: 10px; padding: 15px; border: 1px solid #ddd; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                        th { background-color: #f1f5f9; }
-                    </style>
-                </head>
-                <body>
-                    <h1 style="text-align:center; border-bottom: 2px solid #333; padding-bottom:10px;">FMCG Analytics Execution Report</h1>
-                    ${clone.innerHTML}
-                    <script>
-                        window.onload = function() {
-                            setTimeout(() => { window.print(); window.close(); }, 500);
-                        };
-                    <\/script>
-                </body>
-                </html>
-            `);
-            printWindow.document.close();
-        }
-
-        // ==========================================
-        // EXPORT ENGINE 2: EMAIL COPY (Foolproof)
-        // ==========================================
-        function copyForEmail() {
-            const workspace = document.getElementById('analyticsOutputWorkspace');
-            if (!workspace || workspace.innerHTML.trim() === '') {
-                alert("Please generate analytics first."); return;
-            }
-
-            const clone = workspace.cloneNode(true);
-            
-            // Hardcode Styles for Email Clients
-            clone.querySelectorAll('.print-block, .card, .executive-summary').forEach(el => {
-                el.style.border = '1px solid #cbd5e1'; el.style.padding = '20px'; el.style.marginBottom = '20px';
-                el.style.backgroundColor = '#ffffff'; el.style.fontFamily = 'Arial, sans-serif';
-            });
-            
-            clone.querySelectorAll('table').forEach(t => {
-                t.setAttribute('border', '1'); t.setAttribute('cellpadding', '10'); t.setAttribute('cellspacing', '0');
-                t.style.borderCollapse = 'collapse'; t.style.width = '100%';
-            });
-
-            clone.querySelectorAll('th').forEach(th => { th.style.backgroundColor = '#f1f5f9'; th.style.textAlign = 'left'; });
-
-            // Convert Charts
-            const origCanvases = workspace.getElementsByTagName('canvas');
-            const cloneCanvases = clone.getElementsByTagName('canvas');
-            for(let i = 0; i < origCanvases.length; i++) {
-                const img = document.createElement('img');
-                img.src = origCanvases[i].toDataURL('image/png', 1.0); 
-                img.style.maxWidth = '600px'; img.style.display = 'block';
-                cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
-            }
-
-            const finalHTML = `
-                <div style="font-family: Arial, sans-serif; color: #334155; max-width: 800px;">
-                    <h2 style="color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">FMCG Report</h2>
-                    ${clone.innerHTML}
-                </div>`;
-
-            // Create an invisible div, inject HTML, highlight it, and copy
-            const container = document.createElement('div');
-            container.innerHTML = finalHTML;
-            container.style.position = 'fixed';
-            container.style.left = '-9999px';
-            document.body.appendChild(container);
-
-            const range = document.createRange();
-            range.selectNodeContents(container);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-
-            try {
-                const success = document.execCommand('copy');
-                if (success) {
-                    alert("✅ Rich HTML Copied successfully!\n\nOpen your email (Gmail/Outlook) and press Paste (Ctrl+V).");
-                } else { throw new Error(); }
-            } catch (err) {
-                alert("❌ Browser blocked copy action. Use Export to PDF instead.");
-            }
-            
-            sel.removeAllRanges();
-            document.body.removeChild(container);
-        }
-
-        // ==========================================
-        // SHARE LINK
-        // ==========================================
-        function generateShareLink() {
-            let baseUrl = window.location.href.split('?')[0].split('#')[0];
-            let shareUrl = baseUrl + '?mode=shared&tab=' + currentTab;
-            
-            if (baseUrl.startsWith('file://')) {
-                alert("⚠️ Local File Detected!\n\nTo share this URL over the internet, you must host this HTML file on a free static site like GitHub Pages or Tiiny.host.");
-            } else {
-                prompt("Copy your Shareable Dashboard Link:", shareUrl);
-            }
-        }
-    </script>
-</body>
-</html>
+                <h3>Executive Summary: Route & Beat Optimization</h3>
+                <p><strong>Network Coverage:</strong> The physical distribution network documented <strong>${beats.length} active routes/beats</strong>. These beats encompass a universe of <strong>${totalOutlets.toLocaleString()} mapped outlets</strong>. During this cycle, the sales force successfully visited and billed <strong>${totalVisited.toLocaleString()} outlets</strong>, establishing an average network coverage density of <strong>${avgCoverage}%</strong>.</p>
+                <p><strong>Revenue Generation:</strong> The cumulative gross order value across all beats stands at <strong>₹${totalValue.toLocaleString()}</strong>. The revenue distribution highlights <strong>
